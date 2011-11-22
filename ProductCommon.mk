@@ -26,6 +26,13 @@ PRODUCT_COPY_FILES += \
 	device/softwinner/crane-common/bin/busybox:system/bin/busybox \
 	device/softwinner/crane-common/bin/e2fsck:system/bin/e2fsck 
 
+PRODUCT_PROPERTY_OVERRIDES += \
+	dalvik.vm.heapsize=32m \
+	ro.kernel.android.checkjni=0 \
+	persist.sys.timezone=Asia/Shanghai \
+	persist.sys.language=zh \
+	persist.sys.country=CN 
+
 # Overrides
 PRODUCT_BRAND  := softwinners
 PRODUCT_NAME   := crane_common
