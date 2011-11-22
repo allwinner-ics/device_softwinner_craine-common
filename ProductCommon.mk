@@ -25,13 +25,23 @@ PRODUCT_COPY_FILES += \
 	device/softwinner/crane-common/bin/mkntfs:system/bin/mkntfs \
 	device/softwinner/crane-common/bin/busybox:system/bin/busybox \
 	device/softwinner/crane-common/bin/e2fsck:system/bin/e2fsck 
+	
+# gps conf
+PRODUCT_COPY_FILES += \
+	device/softwinner/crane-common/gps.conf:system/etc/gps.conf	
 
+# wifi conf
+PRODUCT_COPY_FILES += \
+	device/softwinner/crane-common/wpa_supplicant.conf:system/etc/wifi/wpa_supplicant.conf 
+    
 PRODUCT_PROPERTY_OVERRIDES += \
 	dalvik.vm.heapsize=32m \
 	ro.kernel.android.checkjni=0 \
 	persist.sys.timezone=Asia/Shanghai \
 	persist.sys.language=zh \
-	persist.sys.country=CN 
+	persist.sys.country=CN \
+	wifi.interface=wlan0 \
+	wifi.supplicant_scan_interval=15
 
 # Overrides
 PRODUCT_BRAND  := softwinners
