@@ -9,7 +9,7 @@ LOCAL_PATH:= $(call my-dir)
 #			modules/copybit \
 #		))
 
-#include $(addsuffix /Android.mk, $(addprefix $(LOCAL_PATH)/, \
-#			gralloc \
-#			))
 
+include $(addsuffix /Android.mk, $(addprefix $(LOCAL_PATH)/, \
+			hwcomposer \
+			))

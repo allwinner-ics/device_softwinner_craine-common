@@ -35,3 +35,9 @@ BOARD_USES_GENERIC_AUDIO := true
 
 # Set /system/bin/sh to ash, not mksh, to make sure we can switch back.
 # TARGET_SHELL := ash
+
+# audio & camera & cedarx
+CEDARX_CHIP_VERSION := F23
+
+# hardware module include file path
+TARGET_HARDWARE_INCLUDE := $(TOP)/device/softwinner/crane-common/hardware/include
