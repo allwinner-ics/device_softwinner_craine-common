@@ -191,7 +191,10 @@ on post-fs-data
     chown system system /sys/class/android_usb/android0/f_mass_storage/lun/file
     chmod 0660 /sys/class/android_usb/android0/f_mass_storage/lun/file
     chown system system /sys/class/android_usb/android0/f_rndis/ethaddr
-    chmod 0660 /sys/class/android_usb/android0/f_rndis/ethaddr
+    chmod 0660 /sys/class/android_usb/android0/f_rndis/ethaddr    
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/enable 1
+    write /sys/class/android_usb/android0/enable 0
 
 on boot
 # basic network init
@@ -315,7 +318,7 @@ on property:sys.usb.config=none
 on property:sys.usb.config=adb
     write /sys/class/android_usb/android0/enable 0
     write /sys/class/android_usb/android0/idVendor 18d1
-    write /sys/class/android_usb/android0/idProduct D002
+    write /sys/class/android_usb/android0/idProduct 0002
     write /sys/class/android_usb/android0/functions $sys.usb.config
     write /sys/class/android_usb/android0/enable 1
     start adbd
@@ -325,7 +328,7 @@ on property:sys.usb.config=adb
 on property:sys.usb.config=accessory
     write /sys/class/android_usb/android0/enable 0
     write /sys/class/android_usb/android0/idVendor 18d1
-    write /sys/class/android_usb/android0/idProduct 2d00
+    write /sys/class/android_usb/android0/idProduct 0002
     write /sys/class/android_usb/android0/functions $sys.usb.config
     write /sys/class/android_usb/android0/enable 1
     setprop sys.usb.state $sys.usb.config
@@ -334,7 +337,7 @@ on property:sys.usb.config=accessory
 on property:sys.usb.config=accessory,adb
     write /sys/class/android_usb/android0/enable 0
     write /sys/class/android_usb/android0/idVendor 18d1
-    write /sys/class/android_usb/android0/idProduct 2d01
+    write /sys/class/android_usb/android0/idProduct 0002
     write /sys/class/android_usb/android0/functions $sys.usb.config
     write /sys/class/android_usb/android0/enable 1
     start adbd
