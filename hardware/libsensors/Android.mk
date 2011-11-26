@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ifneq ($(findstring $(BOARD_USES_GSENSOR_TYPE),mma7660 mma8451), )
+ifneq ($(findstring $(SW_BOARD_USES_GSENSOR_TYPE),mma7660 mma8451), )
 
 
 LOCAL_PATH := $(call my-dir)
@@ -22,28 +22,28 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-ifeq ($(BOARD_USES_GSENSOR_TYPE), mma7660)
+ifeq ($(SW_BOARD_USES_GSENSOR_TYPE), mma7660)
 LOCAL_CPPFLAGS += -DACCELEROMETER_SENSOR_MMA7660
 endif
 
-ifeq ($(BOARD_USES_GSENSOR_TYPE), mma8451)
+ifeq ($(SW_BOARD_USES_GSENSOR_TYPE), mma8451)
 LOCAL_CPPFLAGS += -DACCELEROMETER_SENSOR_MMA8451
 endif
 
 
-ifeq ($(BOARD_GSENSOR_DIRECT_X), true)
+ifeq ($(SW_BOARD_GSENSOR_DIRECT_X), true)
 LOCAL_CPPFLAGS += -DGSENSOR_DIRECT_X
 endif
 
-ifeq ($(BOARD_GSENSOR_DIRECT_Y), true)
+ifeq ($(SW_BOARD_GSENSOR_DIRECT_Y), true)
 LOCAL_CPPFLAGS += -DGSENSOR_DIRECT_Y
 endif
 
-ifeq ($(BOARD_GSENSOR_DIRECT_Z), true)
+ifeq ($(SW_BOARD_GSENSOR_DIRECT_Z), true)
 LOCAL_CPPFLAGS += -DGSENSOR_DIRECT_Z
 endif
 
-ifeq ($(BOARD_GSENSOR_XY_REVERT), true)
+ifeq ($(SW_BOARD_GSENSOR_XY_REVERT), true)
 LOCAL_CPPFLAGS += -DGSENSOR_XY_REVERT
 endif
 
