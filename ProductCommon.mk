@@ -4,6 +4,8 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base.mk)
 DEVICE_PACKAGE_OVERLAYS := device/softwinner/crane-common/overlay
 
 PRODUCT_PACKAGES += \
+	hwcomposer.sun4i \
+	display.sun4i \
 	make_ext4fs \
 	libjni_pinyinime
 	
