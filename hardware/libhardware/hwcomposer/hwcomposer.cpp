@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+//#define LOG_NDEBUG 0
+
 #include <hardware/hardware.h>
 
 #include <fcntl.h>
@@ -26,7 +28,7 @@
 #include <drv_display_sun4i.h>
 #include <fb.h>
 #include <EGL/egl.h>
-//#define LOG_NDEBUG 0
+
 #include "hwccomposer_priv.h"
 
 /*****************************************************************************/
@@ -96,6 +98,7 @@ static int hwc_requestlayer(sun4i_hwc_context_t *ctx,uint32_t screenid)
 		
 		ctx->hwc_layer.currenthandle = layerhandle;
 		ctx->hwc_screen				 = screenid;
+		ctx->hwc_layeropen			 = false;
 	}
 	else if(screenid != ctx->hwc_screen)
 	{
@@ -119,6 +122,7 @@ static int hwc_requestlayer(sun4i_hwc_context_t *ctx,uint32_t screenid)
 		
 		ctx->hwc_layer.currenthandle 	= layerhandle;
 		ctx->hwc_screen				 	= screenid;
+		ctx->hwc_layeropen			 	= false;
 	}
 	
 	LOGV("ctx->hwc_layer.currenthandle = %d\n",ctx->hwc_layer.currenthandle);
@@ -289,7 +293,8 @@ static bool hwc_can_render_layer(hwc_layer_t *layer)
 {
 	if((layer->format == HWC_FORMAT_MBYUV420)
 		||(layer->format == HWC_FORMAT_MBYUV422)
-		||(layer->format == HWC_FORMAT_YUV420PLANAR))
+		||(layer->format == HWC_FORMAT_YUV420PLANAR)
+		||(layer->format == HWC_FORMAT_DEFAULT))
     {
     	LOGV("format support overlay");
     	
@@ -324,7 +329,6 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
 		tmp_args[3] 			= 0;
 
 		ret = ioctl(fd, DISP_CMD_LAYER_GET_PARA, &tmp_args);
-		LOGV("DISP_CMD_LAYER_GET_PARA, ret %d", ret);
 
         if((tmpLayerAttr.fb.size.width != croprect->right - croprect->left)
            ||(tmpLayerAttr.fb.size.height != croprect->bottom - croprect->top)
@@ -364,7 +368,23 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
         if(needset)
         {
 		    ret = ioctl(fd, DISP_CMD_LAYER_SET_PARA, &tmp_args);
-		    LOGV("DISP_CMD_LAYER_GET_PARA, ret %d", ret);
+		    if(ctx->hwc_layeropen == false)
+		    {
+		    	args[0] 				= screen;
+				args[1] 				= (unsigned long)overlay;
+				args[2] 				= 0;
+				args[3] 				= 0;
+				ioctl(ctx->dispfd, DISP_CMD_LAYER_OPEN, args);
+				
+				//LOGV("------------------------------SET_PARA--0 addr0:%x addr1:%x ret:%d",layer_info.fb.addr[0],layer_info.fb.addr[1],ret);
+				args[0] 				= screen;
+				args[1] 				= (unsigned long)overlay;
+				args[2] 				= 0;
+				args[3] 				= 0;
+				ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
+				
+				ctx->hwc_layeropen = true;
+		    }
         }
 	}
 
@@ -375,7 +395,8 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
 static int hwc_prepare(hwc_composer_device_t *dev, hwc_layer_list_t* list) 
 {
 	LOGV("hwc_prepare list->numHwLayers = %d\n",list->numHwLayers);
-    if (list && (list->flags & HWC_GEOMETRY_CHANGED)) 
+   // if (list && (list->flags & HWC_GEOMETRY_CHANGED)) 
+    if(true)
     {
     	LOGV("hwc_prepare HWC_GEOMETRY_CHANGED list->numHwLayers = %d\n",list->numHwLayers);
     	
@@ -510,7 +531,7 @@ static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
 
     args[0] 						= ctx->hwc_screen;
     args[1] 						= fb_layer_hdl;
-    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_ON,(void*)args);//disable the global alpha, use the pixel's alpha
+    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
 
 	args[0]							= ctx->hwc_screen;
     args[1] 						= fb_layer_hdl;
@@ -552,7 +573,7 @@ static int hwc_setlayerframepara(sun4i_hwc_context_t *ctx,uint32_t value)
     overlaypara                     = (libhwclayerpara_t *)value;
     //set framebuffer parameter to display driver
 	tmpFrmBufAddr.interlace         = (overlaypara->bProgressiveSrc?0:1);
-	LOGD("tmpFrmBufAddr.interlace:%d",tmpFrmBufAddr.interlace);
+	LOGV("tmpFrmBufAddr.interlace:%d",tmpFrmBufAddr.interlace);
 	tmpFrmBufAddr.top_field_first   = overlaypara->bTopFieldFirst;
 	tmpFrmBufAddr.frame_rate        = overlaypara->pVideoInfo.frame_rate;
 	tmpFrmBufAddr.addr[0]           = overlaypara->top_y;
@@ -592,7 +613,7 @@ static int hwc_setlayerframepara(sun4i_hwc_context_t *ctx,uint32_t value)
     //LOGV("overlay = %x",(unsigned long)handle);
     if(overlaypara->first_frame_flg)
     {
-    	//LOGV("overlay first");
+    	LOGV("overlay first ............");
     	args[0] 				= screen;
     	args[1] 				= handle;
     	args[2] 				= (unsigned long) (&layer_info);
@@ -606,19 +627,6 @@ static int hwc_setlayerframepara(sun4i_hwc_context_t *ctx,uint32_t value)
     	args[2] 				= (unsigned long) (&layer_info);
     	args[3] 				= 0;
     	ret = ioctl(ctx->dispfd, DISP_CMD_LAYER_SET_PARA, args);
-    	//LOGV("------------------------------SET_PARA--0 addr0:%x addr1:%x ret:%d",layer_info.fb.addr[0],layer_info.fb.addr[1],ret);
-
-		args[0] 				= screen;
-		args[1] 				= handle;
-		args[2] 				= 0;
-		args[3] 				= 0;
-		ioctl(ctx->dispfd, DISP_CMD_LAYER_OPEN, args);
-
-		args[0] 				= screen;
-		args[1] 				= handle;
-		args[2] 				= 0;
-		args[3] 				= 0;
-		ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
 	}
     else
     {
@@ -766,6 +774,18 @@ static int hwc_setlayerpara(sun4i_hwc_context_t *ctx,uint32_t value)
 	ret = ioctl(ctx->dispfd, DISP_CMD_LAYER_SET_PARA, args);
 	LOGV("SET_PARA ret:%d",ret);
 	
+	args[0] 						= 0;
+	args[1] 						= 0;	
+	args[2] 						= 0;
+    ctx->hwc_layer.org_dispW        = ioctl(ctx->dispfd, DISP_CMD_SCN_GET_WIDTH,args);
+    ctx->hwc_layer.org_dispH        = ioctl(ctx->dispfd, DISP_CMD_SCN_GET_HEIGHT,args);
+    
+    args[0] 						= screenid;
+	args[1] 						= 0;	
+	args[2] 						= 0;
+    ctx->hwc_layer.dispW            = ioctl(ctx->dispfd, DISP_CMD_SCN_GET_WIDTH,args);
+    ctx->hwc_layer.dispH            = ioctl(ctx->dispfd, DISP_CMD_SCN_GET_HEIGHT,args);
+    
 	hwc_setcolorkey(ctx);
 	return ret;
 }
@@ -793,11 +813,21 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
     	args[3]                         = 0;
 		if(value == 1)
 		{
-			ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
+			if(ctx->hwc_layeropen == false)
+			{
+				ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
+				
+				ctx->hwc_layeropen = true;
+			}
 		}
 		else
 		{
-			ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
+			if(ctx->hwc_layeropen == true)
+			{
+				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
+				
+				ctx->hwc_layeropen = false;
+			}
 		}
     	
 	}
@@ -975,7 +1005,7 @@ static int hwc_setscreen(sun4i_hwc_context_t *ctx,uint32_t value)
 	
 	args[0] 						= value;
 	args[1] 						= (unsigned long)overlayhandle;
-	ioctl(ctl_fd, DISP_CMD_LAYER_CK_ON,args);
+	ioctl(ctl_fd, DISP_CMD_LAYER_CK_OFF,args);
 
 	args[0] 						= value;
 	args[1] 						= (unsigned long) overlayhandle;
@@ -1643,12 +1673,7 @@ static int hwc_set_layer(hwc_composer_device_t *dev,hwc_layer_list_t* list)
     {       
         if(list->hwLayers[i].compositionType == HWC_OVERLAY)
         {
-        	LOGV("hwc_set_layer OVERLAY i = %d\n",i);
-        	LOGV("hwc_set_layer OVERLAY list->hwLayers[i].sourceCrop.left = %d,list->hwLayers[i].sourceCrop.right = %d",list->hwLayers[i].sourceCrop.left,list->hwLayers[i].sourceCrop.right);
-        	LOGV("hwc_set_layer OVERLAY list->hwLayers[i].sourceCrop.top = %d,list->hwLayers[i].sourceCrop.bottom = %d",list->hwLayers[i].sourceCrop.top,list->hwLayers[i].sourceCrop.bottom);
-        	LOGV("hwc_set_layer OVERLAY list->hwLayers[i].displayFrame.left = %d,list->hwLayers[i].displayFrame.right = %d",list->hwLayers[i].displayFrame.left,list->hwLayers[i].displayFrame.right);
-        	LOGV("hwc_set_layer OVERLAY list->hwLayers[i].displayFrame.top = %d,list->hwLayers[i].displayFrame.bottom = %d",list->hwLayers[i].displayFrame.top,list->hwLayers[i].displayFrame.bottom);
-            //ret = hwc_setrect(ctx,&list->hwLayers[i].sourceCrop,&list->hwLayers[i].displayFrame);
+            ret = hwc_setrect(ctx,&list->hwLayers[i].sourceCrop,&list->hwLayers[i].displayFrame);
             
             findoverlay = true;
         }     
@@ -1656,7 +1681,6 @@ static int hwc_set_layer(hwc_composer_device_t *dev,hwc_layer_list_t* list)
     
     if(!findoverlay)
     {
-    	LOGV("hwc_show close\n");
     	
     	hwc_show(ctx,0);
     }   

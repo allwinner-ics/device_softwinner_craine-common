@@ -13,7 +13,6 @@
 
 #include <EGL/egl.h>
 
-
 #define  MAX_FBNUM		8
 #define  MAX_LAYERNUM	8
 
@@ -59,6 +58,7 @@ typedef struct hwc_context_t
     int						dispfd;
     sun4i_hwc_layer_t		hwc_layer;
     uint32_t				hwc_screen;
+    bool					hwc_layeropen;
     uint32_t				cur_hdmimode;
 	uint32_t				cur_3dmode;
 	bool					cur_half_enable;
