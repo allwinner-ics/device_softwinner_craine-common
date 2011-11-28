@@ -60,7 +60,8 @@ PRODUCT_PROPERTY_OVERRIDES += \
 	wifi.interface=wlan0 \
 	wifi.supplicant_scan_interval=15 \
 	debug.egl.hw=1 \
-	ro.opengles.version=131072
+	ro.opengles.version=131072 \
+	persist.sys.strictmode.visual=0
 
 
 # Overrides
