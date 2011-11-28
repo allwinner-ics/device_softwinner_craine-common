@@ -8,7 +8,11 @@ PRODUCT_PACKAGES += \
 	display.sun4i \
 	make_ext4fs \
 	libjni_pinyinime
-	
+PRODUCT_PACKAGES += \
+	audio.primary.sun4i \
+	audio.a2dp.default \
+	libaudioutils
+
 # init.rc
 PRODUCT_COPY_FILES += \
 	device/softwinner/crane-common/init.rc:root/init.rc

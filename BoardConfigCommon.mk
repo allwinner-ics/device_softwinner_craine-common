@@ -35,6 +35,8 @@ USE_CAMERA_STUB := true
 HAVE_HTC_AUDIO_DRIVER := true
 BOARD_USES_GENERIC_AUDIO := true
 
+#multi-media
+CEDARX_CHIP_VERSION := F23
 # Set /system/bin/sh to ash, not mksh, to make sure we can switch back.
 # TARGET_SHELL := ash
 
