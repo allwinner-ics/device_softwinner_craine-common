@@ -485,7 +485,7 @@ static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
 		
 		args[0] 						= ctx->hwc_screen;
 		args[1] 						= ctx->hwc_layer.currenthandle;
-		ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_ON,args);
+		ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_OFF,args);
 	}
 	
 	
@@ -501,13 +501,13 @@ static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
 	close(fbfh0);	
 
 	ck.ck_min.alpha 				= 0xff;
-	ck.ck_min.red 					= 0x00; //0x01;
-	ck.ck_min.green 				= 0x00; //0x03;
-	ck.ck_min.blue 					= 0x00; //0x05;
+	ck.ck_min.red 					= 0x05; //0x01;
+	ck.ck_min.green 				= 0x01; //0x03;
+	ck.ck_min.blue 					= 0x07; //0x05;
 	ck.ck_max.alpha 				= 0xff;
-	ck.ck_max.red 					= 0x00; //0x01;
-	ck.ck_max.green 				= 0x00; //0x03;
-	ck.ck_max.blue 					= 0x00; //0x05;
+	ck.ck_max.red 					= 0x05; //0x01;
+	ck.ck_max.green 				= 0x01; //0x03;
+	ck.ck_max.blue 					= 0x07; //0x05;
 	ck.red_match_rule 				= 2;
 	ck.green_match_rule 			= 2;
 	ck.blue_match_rule 				= 2;
