@@ -253,7 +253,10 @@ static void hwc_computerlayerdisplayframe(hwc_composer_device_t *dev)
     LOGV("curlayer->dispW = %d\n",curlayer->org_dispW);
     LOGV("scn_w = %d\n",scn_w);
     LOGV("scn_h = %d\n",scn_h);
-
+    LOGV("curlayer->posX_org = %d\n",curlayer->posX_org);
+    LOGV("curlayer->posY_org = %d\n",curlayer->posY_org);
+    LOGV("curlayer->posW_org = %d\n",curlayer->posW_org);
+    LOGV("curlayer->posH_org = %d\n",curlayer->posH_org);
     if ( temp_x < 0 ) 
     {
         temp_x = 0;
@@ -278,6 +281,11 @@ static void hwc_computerlayerdisplayframe(hwc_composer_device_t *dev)
     {
         temp_h = curlayer->dispH - temp_y;
     }
+
+    LOGV("temp_x = %d\n",temp_x);
+    LOGV("temp_y = %d\n",temp_y);
+    LOGV("temp_w = %d\n",temp_w);
+    LOGV("temp_h = %d\n",temp_h);
 
     if(((int)curlayer->posX != temp_x) || ((int)curlayer->posY != temp_y) 
     	  ||((int)curlayer->posW != temp_w) || ((int)curlayer->posH != temp_h) )
@@ -485,7 +493,14 @@ static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
 		
 		args[0] 						= ctx->hwc_screen;
 		args[1] 						= ctx->hwc_layer.currenthandle;
-		ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_OFF,args);
+		if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
+        {
+		    ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_OFF,args);
+        }
+        else  //screen1 use colorkey
+        {
+		    ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_ON,args);
+        }
 	}
 	
 	
@@ -500,14 +515,29 @@ static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
 	ioctl(fbfh0,FBIOGET_LAYER_HDL_0,&fb_layer_hdl);
 	close(fbfh0);	
 
-	ck.ck_min.alpha 				= 0xff;
-	ck.ck_min.red 					= 0x05; //0x01;
-	ck.ck_min.green 				= 0x01; //0x03;
-	ck.ck_min.blue 					= 0x07; //0x05;
-	ck.ck_max.alpha 				= 0xff;
-	ck.ck_max.red 					= 0x05; //0x01;
-	ck.ck_max.green 				= 0x01; //0x03;
-	ck.ck_max.blue 					= 0x07; //0x05;
+    if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
+    {
+	    ck.ck_min.alpha 				= 0xff;
+    	ck.ck_min.red 					= 0x05; //0x01;
+    	ck.ck_min.green 				= 0x01; //0x03;
+    	ck.ck_min.blue 					= 0x07; //0x05;
+    	ck.ck_max.alpha 				= 0xff;
+    	ck.ck_max.red 					= 0x05; //0x01;
+    	ck.ck_max.green 				= 0x01; //0x03;
+    	ck.ck_max.blue 					= 0x07; //0x05;
+    }
+    else  //screen1 use colorkey
+    {
+	    ck.ck_min.alpha 				= 0xff;
+    	ck.ck_min.red 					= 0x00; //0x01;
+    	ck.ck_min.green 				= 0x00; //0x03;
+    	ck.ck_min.blue 					= 0x00; //0x05;
+    	ck.ck_max.alpha 				= 0xff;
+    	ck.ck_max.red 					= 0x00; //0x01;
+    	ck.ck_max.green 				= 0x00; //0x03;
+    	ck.ck_max.blue 					= 0x00; //0x05;
+    }
+	
 	ck.red_match_rule 				= 2;
 	ck.green_match_rule 			= 2;
 	ck.blue_match_rule 				= 2;
@@ -695,8 +725,6 @@ static int hwc_setlayerpara(sun4i_hwc_context_t *ctx,uint32_t value)
 	        return  -1;
 	    }
 	}
-	
-	screenid = 0;
 	
 	if(screenid > 1)
 	{
@@ -964,11 +992,20 @@ static int hwc_setscreen(sun4i_hwc_context_t *ctx,uint32_t value)
 	args[2] 						= 0;
     g_lcd_width                     = ioctl(ctl_fd, DISP_CMD_SCN_GET_WIDTH,args);
     g_lcd_height                    = ioctl(ctl_fd, DISP_CMD_SCN_GET_HEIGHT,args);
-	
-	layer_info.scn_win.x 			= 0;
-	layer_info.scn_win.y 			= 0;
-	layer_info.scn_win.width 		= g_lcd_width;
-	layer_info.scn_win.height 		= g_lcd_height;
+
+    ctx->hwc_layer.currenthandle    = (unsigned long)overlayhandle;
+	ctx->hwc_screen					= value;
+	LOGV("g_screen = %d",ctx->hwc_screen);
+	LOGV("g_currenthandle = %d",ctx->hwc_layer.currenthandle);
+    ctx->hwc_layer.dispW            = g_lcd_width;
+    ctx->hwc_layer.dispH            = g_lcd_height;
+    LOGV("ctx->hwc_layer.dispW = %d,ctx->hwc_layer.dispH = %d\n",ctx->hwc_layer.dispW,ctx->hwc_layer.dispH);
+
+    hwc_computerlayerdisplayframe((hwc_composer_device_t *)ctx);
+	layer_info.scn_win.x 			= ctx->hwc_layer.posX;
+	layer_info.scn_win.y 			= ctx->hwc_layer.posY;
+	layer_info.scn_win.width 		= ctx->hwc_layer.posW;
+	layer_info.scn_win.height 		= ctx->hwc_layer.posH;
 	//frame buffer pst and size information
     layer_info.alpha_en           	= 0xff;
     layer_info.alpha_val          	= 0xff;  
@@ -1003,9 +1040,14 @@ static int hwc_setscreen(sun4i_hwc_context_t *ctx,uint32_t value)
 	args[3]                 		= 0;
 	ioctl(ctl_fd, DISP_CMD_LAYER_BOTTOM,args);
 	
-	args[0] 						= value;
-	args[1] 						= (unsigned long)overlayhandle;
-	ioctl(ctl_fd, DISP_CMD_LAYER_CK_OFF,args);
+	if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
+    {
+	    ioctl(ctl_fd, DISP_CMD_LAYER_CK_OFF,args);
+    }
+    else  //screen1 use colorkey
+    {
+	    ioctl(ctl_fd, DISP_CMD_LAYER_CK_ON,args);
+    }
 
 	args[0] 						= value;
 	args[1] 						= (unsigned long) overlayhandle;
@@ -1018,14 +1060,6 @@ static int hwc_setscreen(sun4i_hwc_context_t *ctx,uint32_t value)
 	args[2] 						= 0;
 	args[3] 						= 0;
 	ioctl(ctl_fd, DISP_CMD_VIDEO_START, args);
-	
-	ctx->hwc_layer.currenthandle    = (unsigned long)overlayhandle;
-	ctx->hwc_screen					= value;
-	LOGV("g_screen = %d",ctx->hwc_screen);
-	LOGV("g_currenthandle = %d",ctx->hwc_layer.currenthandle);
-    ctx->hwc_layer.dispW            = g_lcd_width;
-    ctx->hwc_layer.dispH            = g_lcd_height;
-    LOGV("ctx->hwc_layer.dispW = %d,ctx->hwc_layer.dispH = %d\n",ctx->hwc_layer.dispW,ctx->hwc_layer.dispH);
     
     return 0;
 
