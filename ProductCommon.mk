@@ -8,10 +8,13 @@ PRODUCT_PACKAGES += \
 	display.sun4i \
 	make_ext4fs \
 	libjni_pinyinime
+	
 PRODUCT_PACKAGES += \
 	audio.primary.sun4i \
 	audio.a2dp.default \
-	libaudioutils
+	libaudioutils \
+	Camera \
+	libjni_mosaic
 
 # init.rc
 PRODUCT_COPY_FILES += \
