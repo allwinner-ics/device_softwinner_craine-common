@@ -376,7 +376,8 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
         if(needset)
         {
 		    ret = ioctl(fd, DISP_CMD_LAYER_SET_PARA, &tmp_args);
-		    if(ctx->hwc_layeropen == false)
+			
+			if(ctx->hwc_layeropen == false && ctx->hwc_reqopen == false)
 		    {
 		    	args[0] 				= screen;
 				args[1] 				= (unsigned long)overlay;
@@ -394,6 +395,7 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
 				ctx->hwc_layeropen = true;
 		    }
         }
+
 	}
 
     return ret;
@@ -826,7 +828,7 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
     int                         ret = 0;
     int                         screen;
     
-    LOGV("hwc_vppon");
+    LOGV("hwc_show, value: %d", value);
 
     overlay                         = ctx->hwc_layer.currenthandle;
     fd                          	= ctx->dispfd;
@@ -862,6 +864,59 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
 
     return ret;
 }
+
+// for taking photo to avoid preview wrong
+static int hwc_reqshow(sun4i_hwc_context_t *ctx,int value)
+{
+    uint32_t					overlay;
+    int                         fd;
+    int                         ret = 0;
+    int                         screen;
+    
+    LOGV("hwc_show, value: %d", value);
+
+    overlay                         = ctx->hwc_layer.currenthandle;
+    fd                          	= ctx->dispfd;
+    screen                          = ctx->hwc_screen;
+//	LOGV("handle = %x,tmpFrmBufAddr.addr[0] = %x,tmpFrmBufAddr.addr[1] = %x,screen = %d\n",handle,tmpFrmBufAddr.addr[0],tmpFrmBufAddr.addr[1],screen);
+    
+    if(ctx->hwc_layer.currenthandle)
+   	{
+	    args[0]							= screen;
+        args[1]                         = ctx->hwc_layer.currenthandle;
+    	args[2]                         = 0;
+    	args[3]                         = 0;
+
+		
+		LOGV("----------screen: %d, handle: %d", screen, ctx->hwc_layer.currenthandle);
+		if(value == 1)
+		{
+			if(ctx->hwc_layeropen == false)
+			{
+				LOGV("----------hwc_layeropen false");
+				ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
+				
+				ctx->hwc_layeropen = true;
+				ctx->hwc_reqopen = false;
+			}
+		}
+		else
+		{
+			if(ctx->hwc_layeropen == true)
+			{
+				LOGV("----------hwc_layeropen true");
+				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
+				
+				ctx->hwc_layeropen = false;
+				ctx->hwc_reqopen = true;
+			}
+		}
+    	
+	}
+
+    return ret;
+}
+
 
 // for camera app, such as QQ , it use pixel sequence of DISP_SEQ_VUVU
 static int hwc_setformat(sun4i_hwc_context_t *ctx,uint32_t value)
@@ -1624,7 +1679,7 @@ static int hwc_setparameter(hwc_composer_device_t *dev,uint32_t param,uint32_t v
 	else if(param == HWC_LAYER_SHOW)
 	{
 		LOGV("param == HWC_LAYER_SHOW,value = %d\n",value);
-    	ret = hwc_show(ctx,value);
+    	ret = hwc_reqshow(ctx,value);
 	}
 	else if(param == HWC_LAYER_SET3DMODE)
 	{

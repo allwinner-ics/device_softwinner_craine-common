@@ -59,6 +59,7 @@ typedef struct hwc_context_t
     sun4i_hwc_layer_t		hwc_layer;
     uint32_t				hwc_screen;
     bool					hwc_layeropen;
+	bool					hwc_reqopen;
     uint32_t				cur_hdmimode;
 	uint32_t				cur_3dmode;
 	bool					cur_half_enable;

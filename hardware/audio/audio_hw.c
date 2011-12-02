@@ -39,6 +39,8 @@
 
 #include "ril_interface.h"
 
+#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
+
 /* Mixer control names */
 #define MIXER_DL2_LEFT_EQUALIZER            "DL2 Left Equalizer"
 #define MIXER_DL2_RIGHT_EQUALIZER           "DL2 Right Equalizer"
@@ -134,14 +136,14 @@ D/tinyalsa(  602): mix id:15 name:ADC Input Mux
 #define MIXER_4KHZ_LPF_0DB                  "4Khz LPF   0dB"
 
 
-/* ALSA cards for OMAP4 */
+/* ALSA cards for A10 */
 #define CARD_OMAP4_ABE 0
 #define CARD_OMAP4_HDMI 1
 #define CARD_TUNA_DEFAULT CARD_OMAP4_ABE
 
-/* ALSA ports for OMAP4 */
+/* ALSA ports for A10 */
 #define PORT_MM 0
-#define PORT_MM2_UL 1
+#define PORT_MM2_UL 0
 #define PORT_VX 2
 #define PORT_TONES 3
 #define PORT_VIBRA 4
@@ -167,9 +169,13 @@ D/tinyalsa(  602): mix id:15 name:ADC Input Mux
 /* number of pseudo periods for low latency playback */
 #define PLAYBACK_SHORT_PERIOD_COUNT 4
 /* number of periods for capture */
-#define CAPTURE_PERIOD_COUNT 2
+// #define CAPTURE_PERIOD_COUNT 2
+#define CAPTURE_PERIOD_COUNT 4
 /* minimum sleep time in out_write() when write threshold is not reached */
 #define MIN_WRITE_SLEEP_US 5000
+
+// add for capture
+#define CAPTURE_PERIOD_SIZE 4096	// can not less than 8192
 
 #define RESAMPLER_BUFFER_FRAMES (SHORT_PERIOD_SIZE * 2)
 #define RESAMPLER_BUFFER_SIZE (4 * RESAMPLER_BUFFER_FRAMES)
@@ -271,7 +277,7 @@ struct pcm_config pcm_config_mm = {
 struct pcm_config pcm_config_mm_ul = {
     .channels = 2,
     .rate = MM_FULL_POWER_SAMPLING_RATE,
-    .period_size = SHORT_PERIOD_SIZE,
+    .period_size = 1024,
     .period_count = CAPTURE_PERIOD_COUNT,
     .format = PCM_FORMAT_S16_LE,
 };
@@ -1135,6 +1141,7 @@ static void select_input_device(struct tuna_audio_device *adev)
 /* must be called with hw device and output stream mutexes locked */
 static int start_output_stream(struct tuna_stream_out *out)
 {
+	F_LOG;
     struct tuna_audio_device *adev = out->dev;
     unsigned int card = CARD_TUNA_DEFAULT;
     unsigned int port = PORT_MM;
@@ -1591,6 +1598,7 @@ static int out_remove_audio_effect(const struct audio_stream *stream, effect_han
 /* must be called with hw device and input stream mutexes locked */
 static int start_input_stream(struct tuna_stream_in *in)
 {
+	F_LOG;
     int ret = 0;
     struct tuna_audio_device *adev = in->dev;
 
@@ -1607,7 +1615,7 @@ static int start_input_stream(struct tuna_stream_in *in)
                                         AUDIO_FORMAT_PCM_16_BIT,
                                         in->config.channels,
                                         in->requested_rate);
-
+	
     /* this assumes routing is done previously */
     in->pcm = pcm_open(0, PORT_MM2_UL, PCM_IN, &in->config);
     if (!pcm_is_ready(in->pcm)) {
@@ -1619,9 +1627,11 @@ static int start_input_stream(struct tuna_stream_in *in)
 
     /* if no supported sample rate is available, use the resampler */
     if (in->resampler) {
+		F_LOG;
         in->resampler->reset(in->resampler);
         in->frames_in = 0;
     }
+	F_LOG;
     return 0;
 }
 
@@ -1929,13 +1939,15 @@ static int get_next_buffer(struct resampler_buffer_provider *buffer_provider,
         return -ENODEV;
     }
 
+	LOGV("get_next_buffer: in->config.period_size: %d, audio_stream_frame_size: %d", 
+		in->config.period_size, audio_stream_frame_size(&in->stream.common));
     if (in->frames_in == 0) {
         in->read_status = pcm_read(in->pcm,
                                    (void*)in->buffer,
                                    in->config.period_size *
                                        audio_stream_frame_size(&in->stream.common));
         if (in->read_status != 0) {
-            LOGE("get_next_buffer() pcm_read error %d", in->read_status);
+            LOGE("get_next_buffer() pcm_read error %d, %s", in->read_status, strerror(errno));
             buffer->raw = NULL;
             buffer->frame_count = 0;
             return in->read_status;
@@ -1970,6 +1982,7 @@ static void release_buffer(struct resampler_buffer_provider *buffer_provider,
  * if necessary and output the number of frames requested to the buffer specified */
 static ssize_t read_frames(struct tuna_stream_in *in, void *buffer, ssize_t frames)
 {
+	// F_LOG;
     ssize_t frames_wr = 0;
 
     while (frames_wr < frames) {
@@ -2009,6 +2022,7 @@ static ssize_t read_frames(struct tuna_stream_in *in, void *buffer, ssize_t fram
  * to the buffer specified */
 static ssize_t process_frames(struct tuna_stream_in *in, void* buffer, ssize_t frames)
 {
+	F_LOG;
     ssize_t frames_wr = 0;
     audio_buffer_t in_buf;
     audio_buffer_t out_buf;
@@ -2075,6 +2089,7 @@ static ssize_t process_frames(struct tuna_stream_in *in, void* buffer, ssize_t f
 static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
                        size_t bytes)
 {
+	// F_LOG;
     int ret = 0;
     struct tuna_stream_in *in = (struct tuna_stream_in *)stream;
     struct tuna_audio_device *adev = in->dev;
@@ -2447,8 +2462,11 @@ static int adev_open_input_stream(struct audio_hw_device *dev, uint32_t devices,
     memcpy(&in->config, &pcm_config_mm_ul, sizeof(pcm_config_mm_ul));
     in->config.channels = channel_count;
 
+	LOGD("to malloc in-buffer: period_size: %d, frame_size: %d", 
+		in->config.period_size, audio_stream_frame_size(&in->stream.common));
     in->buffer = malloc(in->config.period_size *
-                        audio_stream_frame_size(&in->stream.common));
+                        audio_stream_frame_size(&in->stream.common) * 8);
+
     if (!in->buffer) {
         ret = -ENOMEM;
         goto err;
@@ -2493,8 +2511,11 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
 
     in_standby(&stream->common);
 
-    if (in->resampler) {
+	if (in->buffer) {
         free(in->buffer);
+		in->buffer = 0;
+	}
+    if (in->resampler) {
         release_resampler(in->resampler);
     }
 
@@ -2575,6 +2596,7 @@ static int adev_open(const hw_module_t* module, const char* name,
     adev->hw_device.open_input_stream = adev_open_input_stream;
     adev->hw_device.close_input_stream = adev_close_input_stream;
     adev->hw_device.dump = adev_dump;
+	
 /*
     adev->mixer = mixer_open(0);
     if (!adev->mixer) {
