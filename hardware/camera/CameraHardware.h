@@ -92,12 +92,12 @@ public:
      * timestamp - Frame's timestamp.
      * camera_dev - Camera device instance that delivered the frame.
      */
-    virtual void onNextFrameAvailable(const void* frame,
+    virtual bool onNextFrameAvailable(const void* frame,
                                       nsecs_t timestamp,
                                       V4L2Camera* camera_dev,
                                       bool bUseMataData);
 
-	virtual void onNextFramePreview(const void* frame,
+	virtual bool onNextFramePreview(const void* frame,
                                     nsecs_t timestamp,
                                     V4L2Camera* camera_dev,
                                     bool bUseMataData);

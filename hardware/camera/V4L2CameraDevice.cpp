@@ -42,7 +42,8 @@ V4L2CameraDevice::V4L2CameraDevice(CameraHardwareDevice* camera_hal, int id)
       mCameraID(id),
       mCamFd(0),
       mDeviceID(-1),
-      mUseMetaDataBufferMode(false)
+      mUseMetaDataBufferMode(false),
+      mPreviewUseSW(false)
 {
 	F_LOG;
 	memset(mDeviceName, 0, sizeof(mDeviceName));
@@ -132,6 +133,9 @@ status_t V4L2CameraDevice::startDevice(int width,
         return EINVAL;
     }
 	
+	mUseMetaDataBufferMode = false;
+	mPreviewUseSW = false;
+	
 	// set v4l2 device parameters
 	v4l2SetVideoParams(width, height, pix_fmt);
 	
@@ -174,7 +178,6 @@ status_t V4L2CameraDevice::stopDevice()
 	// v4l2 device unmap buffers
     v4l2UnmapBuf();
 
-	mUseMetaDataBufferMode = false;
     mState = ECDS_CONNECTED;
 
     return NO_ERROR;
@@ -200,72 +203,87 @@ bool V4L2CameraDevice::inWorkerThread()
 	int ret = getPreviewFrame(&buf);
 	if (ret != OK)
 	{
-		usleep(30000);
+		usleep(10000);
 		return ret;
 	}
+
+	if (mUseMetaDataBufferMode && !mPreviewUseSW)
+	{
+		dealWithVideoFrameHW(&buf);
+	}
+	else
+	{
+		dealWithVideoFrameSW(&buf);
+	}
+	
+    return true;
+}
+
+void V4L2CameraDevice::dealWithVideoFrameHW(v4l2_buffer * pBuf)
+{
+	bool ret = false;
 	
 	/* Timestamp the current frame, and notify the camera HAL about new frame. */
 	// mCurFrameTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);
-	mCurFrameTimestamp = (int64_t)((int64_t)buf.timestamp.tv_usec + (((int64_t)buf.timestamp.tv_sec) * 1000000));
+	mCurFrameTimestamp = (int64_t)((int64_t)pBuf->timestamp.tv_usec + (((int64_t)pBuf->timestamp.tv_sec) * 1000000));
 
 	// V4L2BUF_t for preview and HW encoder
 	V4L2BUF_t v4l2_buf;
-	v4l2_buf.addrPhyY	= buf.m.offset;
-	v4l2_buf.index		= buf.index;
+	v4l2_buf.addrPhyY	= pBuf->m.offset;
+	v4l2_buf.index		= pBuf->index;
 	v4l2_buf.timeStamp	= mCurFrameTimestamp;
 	
 	// LOGV("DQBUF: id: %d, time: %lld", buf.index, mCurFrameTimestamp);
 
-#define HW_RPEVIEW
-#ifdef HW_RPEVIEW
-	mCameraHAL->onNextFramePreview(&v4l2_buf, mCurFrameTimestamp, this, mUseMetaDataBufferMode);
-#endif // HW_RPEVIEW
-
-	if (mUseMetaDataBufferMode)
+	// preview this buffer
+	ret = mCameraHAL->onNextFramePreview(&v4l2_buf, mCurFrameTimestamp, this, true);
+	if (!ret)
 	{
-		mCameraHAL->onNextFrameCB(&v4l2_buf, mCurFrameTimestamp, this, mUseMetaDataBufferMode);
-		
-#ifndef HW_RPEVIEW
-#define FOR_TEST
-#ifdef FOR_TEST
-		static int cnt1 = 0;
-		if(!(cnt1++ % 2))
-			goto GOON1;
-#endif
-
-		// copy buffer
-		memcpy(mCurrentFrame, mMapMem.mem[buf.index], buf.length); 
-		mCameraHAL->onNextFramePreview(mCurrentFrame, mCurFrameTimestamp, this, false);
-		
-#ifdef FOR_TEST
-GOON1:
-#endif
-#endif // HW_RPEVIEW
-		releasePreviewFrame(buf.index);
+		releasePreviewFrame(pBuf->index);
+		mPreviewUseSW = true;
+		return ;
 	}
-	else
-	{
+	
+	// callback this buffer
+	mCameraHAL->onNextFrameCB(&v4l2_buf, mCurFrameTimestamp, this, true);
+
+	// release this frame in preview
+	releasePreviewFrame(pBuf->index);
+}
+
+void V4L2CameraDevice::dealWithVideoFrameSW(v4l2_buffer * pBuf)
+{
+	/* Timestamp the current frame, and notify the camera HAL about new frame. */
+	// mCurFrameTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);
+	mCurFrameTimestamp = (int64_t)((int64_t)pBuf->timestamp.tv_usec + (((int64_t)pBuf->timestamp.tv_sec) * 1000000));
+
+	// V4L2BUF_t for preview and HW encoder
+	V4L2BUF_t v4l2_buf;
+	v4l2_buf.addrPhyY	= pBuf->m.offset;
+	v4l2_buf.index		= pBuf->index;
+	v4l2_buf.timeStamp	= mCurFrameTimestamp;
+	
+	// LOGV("DQBUF: id: %d, time: %lld", buf.index, mCurFrameTimestamp);
+
+// #define FOR_TEST
 #ifdef FOR_TEST
-		static int cnt = 0;
-		if(!(cnt++ % 2))
-			goto GOON;
+	static int cnt = 0;
+	if(!(cnt++ % 2))
+		goto GOON;
 #endif
-		// copy buffer
-		memcpy(mCurrentFrame, mMapMem.mem[buf.index], buf.length); 
 
-#ifndef HW_RPEVIEW
-		mCameraHAL->onNextFramePreview(mCurrentFrame, mCurFrameTimestamp, this, mUseMetaDataBufferMode);
-#endif // HW_RPEVIEW
+	// copy buffer
+	memcpy(mCurrentFrame, mMapMem.mem[pBuf->index], pBuf->length); 
 
-	    mCameraHAL->onNextFrameCB(mCurrentFrame, mCurFrameTimestamp, this, mUseMetaDataBufferMode);
+	mCameraHAL->onNextFramePreview(mCurrentFrame, mCurFrameTimestamp, this, false);
+
+    mCameraHAL->onNextFrameCB(mCurrentFrame, mCurFrameTimestamp, this, false);
 
 #ifdef FOR_TEST
 GOON:
 #endif
-		releasePreviewFrame(buf.index);
-	}
 
-    return true;
+	releasePreviewFrame(pBuf->index);
 }
 
 // -----------------------------------------------------------------------------

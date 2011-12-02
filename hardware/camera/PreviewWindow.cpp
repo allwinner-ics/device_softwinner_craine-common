@@ -39,6 +39,7 @@ PreviewWindow::PreviewWindow()
       mPreviewFrameWidth(0),
       mPreviewFrameHeight(0),
       mPreviewEnabled(false),
+      mShouldAdjustDimensions(true),
       mOverlayFirstFrame(true)
 {
 	F_LOG;
@@ -109,22 +110,22 @@ void PreviewWindow::stopPreview()
 /****************************************************************************
  * Public API
  ***************************************************************************/
-void PreviewWindow::onNextFrameAvailable(const void* frame,
+bool PreviewWindow::onNextFrameAvailable(const void* frame,
 										 nsecs_t timestamp,
 										 V4L2Camera* camera_dev,
                                          bool bUseMataData)
 {
 	if (bUseMataData)
 	{
-		onNextFrameAvailableHW(frame, timestamp, camera_dev);
+		return onNextFrameAvailableHW(frame, timestamp, camera_dev);
 	}
 	else
 	{
-		onNextFrameAvailableSW(frame, timestamp, camera_dev);
+		return onNextFrameAvailableSW(frame, timestamp, camera_dev);
 	}
 }
 
-void PreviewWindow::onNextFrameAvailableHW(const void* frame,
+bool PreviewWindow::onNextFrameAvailableHW(const void* frame,
                                          nsecs_t timestamp,
                                          V4L2Camera* camera_dev)
 {
@@ -135,11 +136,11 @@ void PreviewWindow::onNextFrameAvailableHW(const void* frame,
 
 	if (!isPreviewEnabled() || mPreviewWindow == NULL) 
 	{
-        return;
+        return true;
     }
 	
     /* Make sure that preview window dimensions are OK with the camera device */
-    if (adjustPreviewDimensions(camera_dev)) 
+    if (mShouldAdjustDimensions || adjustPreviewDimensions(camera_dev)) 
 	{
         LOGV("%s: Adjusting preview windows %p geometry to %dx%d",
              __FUNCTION__, mPreviewWindow, mPreviewFrameWidth,
@@ -152,8 +153,11 @@ void PreviewWindow::onNextFrameAvailableHW(const void* frame,
         if (res != NO_ERROR) {
             LOGE("%s: Error in set_buffers_geometry %d -> %s",
                  __FUNCTION__, -res, strerror(-res));
-            return;
-        }		
+
+			mShouldAdjustDimensions = true;
+            return false;
+        }
+		mShouldAdjustDimensions = false;
     }
 
 	libhwclayerpara_t overlay_para;
@@ -185,16 +189,18 @@ void PreviewWindow::onNextFrameAvailableHW(const void* frame,
 	if (res != OK)
 	{
 		LOGE("NATIVE_WINDOW_SETPARAMETER failed");
+		return false;
 	}
 
 	if (mLayerShowHW == 0)
 	{
 		showLayer(true);
 	}
-		
+
+	return true;
 }
 
-void PreviewWindow::onNextFrameAvailableSW(const void* frame,
+bool PreviewWindow::onNextFrameAvailableSW(const void* frame,
                                          nsecs_t timestamp,
                                          V4L2Camera* camera_dev)
 {
@@ -202,11 +208,11 @@ void PreviewWindow::onNextFrameAvailableSW(const void* frame,
     Mutex::Autolock locker(&mObjectLock);
 
     if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {
-        return;
+        return true;
     }
 
     /* Make sure that preview window dimensions are OK with the camera device */
-    if (adjustPreviewDimensions(camera_dev)) {
+    if (mShouldAdjustDimensions || adjustPreviewDimensions(camera_dev)) {
         /* Need to set / adjust buffer geometry for the preview window.
          * Note that in the emulator preview window uses only RGB for pixel
          * formats. */
@@ -220,8 +226,9 @@ void PreviewWindow::onNextFrameAvailableSW(const void* frame,
         if (res != NO_ERROR) {
             LOGE("%s: Error in set_buffers_geometry %d -> %s",
                  __FUNCTION__, -res, strerror(-res));
-            return;
+            // return false;
         }
+		mShouldAdjustDimensions = false;
     }
 
     /*
@@ -235,7 +242,7 @@ void PreviewWindow::onNextFrameAvailableSW(const void* frame,
     if (res != NO_ERROR || buffer == NULL) {
         LOGE("%s: Unable to dequeue preview window buffer: %d -> %s",
             __FUNCTION__, -res, strerror(-res));
-        return;
+        return false;
     }
 
     /* Let the preview window to lock the buffer. */
@@ -244,7 +251,7 @@ void PreviewWindow::onNextFrameAvailableSW(const void* frame,
         LOGE("%s: Unable to lock preview window buffer: %d -> %s",
              __FUNCTION__, -res, strerror(-res));
         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
-        return;
+        return false;
     }
 
     /* Now let the graphics framework to lock the buffer, and provide
@@ -257,7 +264,7 @@ void PreviewWindow::onNextFrameAvailableSW(const void* frame,
         LOGE("%s: grbuffer_mapper.lock failure: %d -> %s",
              __FUNCTION__, res, strerror(res));
         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
-        return;
+        return false;
     }
 
     /* Frames come in in YV12/NV12/NV21 format. Since preview window doesn't
@@ -271,6 +278,8 @@ void PreviewWindow::onNextFrameAvailableSW(const void* frame,
         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
     }
     grbuffer_mapper.unlock(*buffer);
+
+	return true;
 }
 
 /***************************************************************************
@@ -291,6 +300,7 @@ bool PreviewWindow::adjustPreviewDimensions(V4L2Camera* camera_dev)
     mPreviewFrameWidth = camera_dev->getFrameWidth();
     mPreviewFrameHeight = camera_dev->getFrameHeight();
 
+	mShouldAdjustDimensions = false;
     return true;
 }
 

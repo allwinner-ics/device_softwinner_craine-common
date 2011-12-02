@@ -291,27 +291,35 @@ void CameraHardware::initDefaultParameters()
 	LOGV("CameraHardware::initDefaultParameters ok");
 }
 
-void CameraHardware::onNextFrameAvailable(const void* frame,
+bool CameraHardware::onNextFrameAvailable(const void* frame,
                                           nsecs_t timestamp,
                                           V4L2Camera* camera_dev,
                                           bool bUseMataData)
 {
 	// F_LOG;
+	bool ret = false;
+	
     /* Notify the preview window first. */
-    mPreviewWindow.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
+	ret = mPreviewWindow.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
+    if(!ret)
+	{
+		return ret;
+	}
 
     /* Notify callback notifier next. */
-    mCallbackNotifier.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
+	mCallbackNotifier.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
+
+	return true;
 }
 
-void CameraHardware::onNextFramePreview(const void* frame,
+bool CameraHardware::onNextFramePreview(const void* frame,
 									  nsecs_t timestamp,
 									  V4L2Camera* camera_dev,
                                       bool bUseMataData)
 {
 	// F_LOG;
     /* Notify the preview window first. */
-    mPreviewWindow.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
+    return mPreviewWindow.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
 }
 
 void CameraHardware::onNextFrameCB(const void* frame,

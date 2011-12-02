@@ -116,6 +116,7 @@ public:
 	int setFlashMode(int mode);
 	
 	void releasePreviewFrame(int index);			// Q buffer for encoder
+
 	
 private:
 	int openCameraDev();
@@ -128,6 +129,10 @@ private:
 	int v4l2UnmapBuf();
 	
 	int getPreviewFrame(v4l2_buffer *buf);
+	
+	void dealWithVideoFrame(v4l2_buffer * pBuf);						// preview or cb video frame
+	void dealWithVideoFrameSW(v4l2_buffer * pBuf);
+	void dealWithVideoFrameHW(v4l2_buffer * pBuf);
 
 	// camera id
 	int mCameraID;
@@ -149,6 +154,9 @@ private:
 
 	// use MetaData buffer mode for HW encoder and HW preview
 	bool mUseMetaDataBufferMode;
+
+	// HW preview failed, should use SW preview
+	bool mPreviewUseSW;
 };
 
 }; /* namespace android */

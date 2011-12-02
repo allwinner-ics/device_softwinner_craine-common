@@ -99,16 +99,16 @@ public:
      * timestamp - Frame's timestamp.
      * camera_dev - Camera device instance that delivered the frame.
      */
-    void onNextFrameAvailable(const void* frame,
+    bool onNextFrameAvailable(const void* frame,
                               nsecs_t timestamp,
                               V4L2Camera* camera_dev,
                               bool bUseMataData);
 
-	void onNextFrameAvailableSW(const void* frame,
+	bool onNextFrameAvailableSW(const void* frame,
                               nsecs_t timestamp,
                               V4L2Camera* camera_dev);
 
-	void onNextFrameAvailableHW(const void* frame,
+	bool onNextFrameAvailableHW(const void* frame,
                               nsecs_t timestamp,
                               V4L2Camera* camera_dev);
 
@@ -178,7 +178,7 @@ public:
 
 protected:
 	bool							mOverlayFirstFrame;
-
+	bool							mShouldAdjustDimensions;
 	int								mLayerShowHW;
 };
 
