@@ -43,5 +43,8 @@ CEDARX_CHIP_VERSION := F23
 # audio & camera & cedarx
 CEDARX_CHIP_VERSION := F23
 
+# use our own su for root
+BOARD_USES_ROOT_SU := true
+
 # hardware module include file path
 TARGET_HARDWARE_INCLUDE := $(TOP)/device/softwinner/crane-common/hardware/include

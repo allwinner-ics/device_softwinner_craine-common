@@ -195,6 +195,10 @@ on post-fs-data
     chmod 0660 /sys/class/android_usb/android0/f_rndis/ethaddr    
  
 on boot
+# su root	
+	chown root root /system/xbin/su
+	chmod 6755 /system/xbin/su	
+
 # basic network init
     ifup lo
     hostname localhost
