@@ -341,7 +341,7 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
         if((tmpLayerAttr.fb.size.width != croprect->right - croprect->left)
            ||(tmpLayerAttr.fb.size.height != croprect->bottom - croprect->top)
            ||(tmpLayerAttr.src_win.x != croprect->left)
-           ||(tmpLayerAttr.src_win.y != croprect->right))
+           ||(tmpLayerAttr.src_win.y != croprect->top))
         {
             tmpLayerAttr.fb.size.width 		= croprect->right - croprect->left;
     		tmpLayerAttr.fb.size.height 	= croprect->bottom - croprect->top;
@@ -377,7 +377,7 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
         {
 		    ret = ioctl(fd, DISP_CMD_LAYER_SET_PARA, &tmp_args);
 			
-			if(ctx->hwc_layeropen == false && ctx->hwc_reqopen == false)
+			if((!ctx->hwc_layeropen) && (!ctx->hwc_reqclose) && (ctx->hwc_frameset))
 		    {
 		    	args[0] 				= screen;
 				args[1] 				= (unsigned long)overlay;
@@ -638,6 +638,7 @@ static int hwc_setlayerframepara(sun4i_hwc_context_t *ctx,uint32_t value)
 	tmpFrmBufAddr.id                = overlaypara->number; 
 	ctx->hwc_layer.cur_frameid		= tmpFrmBufAddr.id;
 	handle							= (unsigned long)ctx->hwc_layer.currenthandle;
+    ctx->hwc_frameset               = true;
     //LOGV("overlaypara->bProgressiveSrc = %x",overlaypara->bProgressiveSrc);
     //LOGV("overlaypara->bTopFieldFirst = %x",overlaypara->bTopFieldFirst);
     //LOGV("overlaypara->pVideoInfo.frame_rate = %x",overlaypara->pVideoInfo.frame_rate);
@@ -815,7 +816,13 @@ static int hwc_setlayerpara(sun4i_hwc_context_t *ctx,uint32_t value)
 	args[2] 						= 0;
     ctx->hwc_layer.dispW            = ioctl(ctx->dispfd, DISP_CMD_SCN_GET_WIDTH,args);
     ctx->hwc_layer.dispH            = ioctl(ctx->dispfd, DISP_CMD_SCN_GET_HEIGHT,args);
-    
+    ctx->hwc_layeropen 				= false;
+    ctx->hwc_reqclose 				= false;
+    ctx->hwc_layer.posX_org			= 0;
+	ctx->hwc_layer.posY_org			= 0;
+	ctx->hwc_layer.posW_org			= 0;
+	ctx->hwc_layer.posH_org			= 0;
+    ctx->hwc_frameset               = false;
 	hwc_setcolorkey(ctx);
 	return ret;
 }
@@ -847,6 +854,10 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
 			{
 				ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
 				
+				ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
+				
+				
+				
 				ctx->hwc_layeropen = true;
 			}
 		}
@@ -856,6 +867,7 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
 			{
 				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
 				
+				ioctl(fd, DISP_CMD_VIDEO_STOP, args);
 				ctx->hwc_layeropen = false;
 			}
 		}
@@ -893,11 +905,16 @@ static int hwc_reqshow(sun4i_hwc_context_t *ctx,int value)
 		{
 			if(ctx->hwc_layeropen == false)
 			{
-				LOGV("----------hwc_layeropen false");
-				ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
-				
-				ctx->hwc_layeropen = true;
-				ctx->hwc_reqopen = false;
+				if((ctx->hwc_layer.posW_org != 0)
+	   			||(ctx->hwc_layer.posH_org != 0))
+				{
+					LOGV("----------hwc_layeropen false");
+					ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
+					
+				    ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);				
+					ctx->hwc_layeropen = true;
+				}
+				ctx->hwc_reqclose = false;
 			}
 		}
 		else
@@ -907,8 +924,10 @@ static int hwc_reqshow(sun4i_hwc_context_t *ctx,int value)
 				LOGV("----------hwc_layeropen true");
 				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
 				
+				ioctl(fd, DISP_CMD_VIDEO_STOP, args);
+				
 				ctx->hwc_layeropen = false;
-				ctx->hwc_reqopen = true;
+				ctx->hwc_reqclose = true;
 			}
 		}
     	
