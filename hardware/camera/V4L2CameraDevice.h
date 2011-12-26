@@ -24,6 +24,7 @@
 
 #include "Converters.h"
 #include "V4L2Camera.h"
+#include <type_camera.h>
 
 namespace android {
 
@@ -85,19 +86,6 @@ protected:
      */
     bool inWorkerThread();
 
-    /****************************************************************************
-     * Fake camera device data members
-     ***************************************************************************/
-
-private:
-    /* Emulated FPS (frames per second).
-     * We will emulate 50 FPS. */
-    static const int        mEmulatedFPS = 15;
-
-    /* Defines time (in nanoseconds) between redrawing the checker board.
-     * We will redraw the checker board every 15 milliseconds. */
-    static const nsecs_t    mRedrawAfter = 15000000LL;
-
 	// -------------------------------------------------------------------------
 	// extended interfaces here <***** star *****>
 	// -------------------------------------------------------------------------
@@ -109,6 +97,7 @@ public:
 	int setV4L2DeviceID(int device_id);				// set different device id on the same CSI
 	int tryFmtSize(int * width, int * height);		// check if driver support this size
 	int getFrameRate();								// get v4l2 device current frame rate
+	int setCameraFacing(int facing);
 
 	int setImageEffect(int effect);
 	int setWhiteBalance(int wb);
@@ -116,8 +105,7 @@ public:
 	int setFlashMode(int mode);
 	
 	void releasePreviewFrame(int index);			// Q buffer for encoder
-
-	
+		
 private:
 	int openCameraDev();
 	void closeCameraDev();
@@ -130,33 +118,52 @@ private:
 	
 	int getPreviewFrame(v4l2_buffer *buf);
 	
-	void dealWithVideoFrame(v4l2_buffer * pBuf);						// preview or cb video frame
-	void dealWithVideoFrameSW(v4l2_buffer * pBuf);
-	void dealWithVideoFrameHW(v4l2_buffer * pBuf);
+	void dealWithVideoFrameSW(V4L2BUF_t * pBuf);
+	void dealWithVideoFrameHW(V4L2BUF_t * pBuf);
+	void dealWithVideoFrameTest(V4L2BUF_t * pBuf);
+	
+	/* Checks if it's the time to push new frame to the preview window.
+	 * Note that this method must be called while object is locked. */
+	bool isPreviewTime();
 
+private:
+	// -------------------------------------------------------------------------
+	// private data
+	// -------------------------------------------------------------------------
+	
 	// camera id
-	int mCameraID;
+	int								mCameraID;
 	
 	// v4l2 device handle
-	int mCamFd; 
+	int								mCamFd; 
 
 	// device node name
-	char mDeviceName[16];
+	char							mDeviceName[16];
 
 	// device id on the CSI, used when two camera device shared with one CSI
-	int mDeviceID;
+	int								mDeviceID;
+
+	// camera facing back / front
+	int								mCameraFacing;
 
 	typedef struct v4l2_mem_map_t{
 		void *	mem[NB_BUFFER]; 
 		int 	length;
 	}v4l2_mem_map_t;
-	v4l2_mem_map_t mMapMem;
+	v4l2_mem_map_t					mMapMem;
 
-	// use MetaData buffer mode for HW encoder and HW preview
-	bool mUseMetaDataBufferMode;
+	// actually buffer counts
+	int								mBufferCnt;
 
 	// HW preview failed, should use SW preview
-	bool mPreviewUseSW;
+	bool							mPreviewUseHW;
+	
+	/* Timestamp (abs. microseconds) when last frame has been pushed to the
+     * preview window. */
+    uint64_t                        mLastPreviewed;
+
+    /* Preview frequency in microseconds. */
+    uint32_t                        mPreviewAfter;
 };
 
 }; /* namespace android */

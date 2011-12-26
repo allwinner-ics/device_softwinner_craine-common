@@ -19,9 +19,9 @@
  * available for emulation.
  */
 
-#define LOG_NDEBUG 0
 #define LOG_TAG "HALCameraFactory"
-#include <cutils/log.h>
+#include "CameraDebug.h"
+
 #include <cutils/properties.h>
 
 #include "CameraHardwareDevice.h"
@@ -33,8 +33,6 @@ extern camera_module_t HAL_MODULE_INFO_SYM;
  * initialized when camera emulation HAL is loaded.
  */
 android::HALCameraFactory  gEmulatedCameraFactory;
-
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
 
 namespace android {
 

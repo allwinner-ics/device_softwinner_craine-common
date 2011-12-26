@@ -18,22 +18,16 @@
  * Contains implementation of a class V4L2CameraDevice that encapsulates
  * fake camera device.
  */
-
-#define LOG_NDEBUG 0
 #define LOG_TAG "V4L2CameraDevice"
-#include <cutils/log.h>
+#include "CameraDebug.h"
 
 #include <fcntl.h> 
 #include <sys/mman.h> 
-
-#include "../include/videodev2.h"			// must before videodev.h
+#include <videodev2.h>
 #include <linux/videodev.h> 
-#include <type_camera.h>
 
 #include "CameraHardwareDevice.h"
 #include "V4L2CameraDevice.h"
-
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
 
 namespace android {
 
@@ -42,8 +36,11 @@ V4L2CameraDevice::V4L2CameraDevice(CameraHardwareDevice* camera_hal, int id)
       mCameraID(id),
       mCamFd(0),
       mDeviceID(-1),
-      mUseMetaDataBufferMode(false),
-      mPreviewUseSW(false)
+      mBufferCnt(NB_BUFFER),
+      mCameraFacing(0),
+      mPreviewUseHW(true),
+      mLastPreviewed(0),
+      mPreviewAfter(0)
 {
 	F_LOG;
 	memset(mDeviceName, 0, sizeof(mDeviceName));
@@ -121,7 +118,7 @@ status_t V4L2CameraDevice::startDevice(int width,
                                        int height,
                                        uint32_t pix_fmt)
 {
-	F_LOG;
+	LOGD("%s, wxh: %dx%d, fmt: %d", __FUNCTION__, width, height, pix_fmt);
 
     Mutex::Autolock locker(&mObjectLock);
     if (!isConnected()) {
@@ -132,10 +129,7 @@ status_t V4L2CameraDevice::startDevice(int width,
         LOGE("%s: Fake camera device is already started.", __FUNCTION__);
         return EINVAL;
     }
-	
-	mUseMetaDataBufferMode = false;
-	mPreviewUseSW = false;
-	
+		
 	// set v4l2 device parameters
 	v4l2SetVideoParams(width, height, pix_fmt);
 	
@@ -154,19 +148,38 @@ status_t V4L2CameraDevice::startDevice(int width,
     if (res == NO_ERROR) {
 		mState = ECDS_STARTED;
     }
-	
-	mUseMetaDataBufferMode = mCameraHAL->isUseMetaDataBufferMode();
+
+	mPreviewUseHW = true;
+	mPreviewAfter = 1000000 / getFrameRate();
+
+	// front camera do not use hw preview, SW preview will mirror it
+	if (mCameraFacing == CAMERA_FACING_FRONT)
+	{
+		LOGD("do not us hw preview");
+		mPreviewUseHW = false;
+
+		int pix = mFrameWidth * mFrameHeight;
+		
+		if (pix <= 640*480)
+		{
+			mPreviewAfter = 1000000 / 15;		// VGA
+		}
+		else
+		{
+			mPreviewAfter = 1000000 / 7;
+		}
+	}
 	
     return res;
 }
 
 status_t V4L2CameraDevice::stopDevice()
 {
-	F_LOG;
+	LOGD("stopDevice");
 
     Mutex::Autolock locker(&mObjectLock);
     if (!isStarted()) {
-        LOGW("%s: Fake camera device is not started.", __FUNCTION__);
+        LOGW("%s: camera device is not started.", __FUNCTION__);
         return NO_ERROR;
     }
 	
@@ -196,7 +209,7 @@ bool V4L2CameraDevice::inWorkerThread()
         LOGV("%s: Worker thread has been terminated.", __FUNCTION__);
         return false;
     }
-
+	
 	// get one video frame
 	struct v4l2_buffer buf;
 	memset(&buf, 0, sizeof(v4l2_buffer));
@@ -206,82 +219,128 @@ bool V4L2CameraDevice::inWorkerThread()
 		usleep(10000);
 		return ret;
 	}
+	
+	/* Timestamp the current frame, and notify the camera HAL about new frame. */
+	// mCurFrameTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);
+	mCurFrameTimestamp = (int64_t)((int64_t)buf.timestamp.tv_usec + (((int64_t)buf.timestamp.tv_sec) * 1000000));
 
-	if (mUseMetaDataBufferMode && !mPreviewUseSW)
+	// V4L2BUF_t for preview and HW encoder
+	V4L2BUF_t v4l2_buf;
+	v4l2_buf.addrPhyY	= buf.m.offset;
+	v4l2_buf.index		= buf.index;
+	v4l2_buf.timeStamp	= mCurFrameTimestamp;
+
+	// LOGV("DQBUF: addrPhyY: %x, id: %d, time: %lld", v4l2_buf.addrPhyY, buf.index, mCurFrameTimestamp);
+	
+#if 1
+	if (mTakingPicture)
 	{
-		dealWithVideoFrameHW(&buf);
+		LOGD("%s, taking picture", __FUNCTION__);
+		int64_t lastTime = systemTime() / 1000;
+		mCameraHAL->onTakingPicture(&v4l2_buf, this, true);
+		int64_t nowTime = systemTime() / 1000;
+		LOGD("hw picture size: %dx%d takes %lld (ms)", mFrameWidth, mFrameHeight, (nowTime - lastTime) / 1000);
+		mTakingPicture = false;
+		return true;
+	}
+#else
+	if (mTakingPicture)
+	{
+		LOGD("%s, taking picture", __FUNCTION__);
+		int64_t lastTime = systemTime() / 1000;
+		// copy buffer
+		memcpy(mCurrentFrame, mMapMem.mem[v4l2_buf.index], mMapMem.length); 
+		mCameraHAL->onTakingPicture(mCurrentFrame, this, false);
+		int64_t nowTime = systemTime() / 1000;
+		LOGD("sw picture size: %dx%d takes %lld (ms)", mFrameWidth, mFrameHeight, (nowTime - lastTime) / 1000);
+		mTakingPicture = false;
+		return true;
+	}
+#endif
+	
+	if (mCameraHAL->isUseMetaDataBufferMode())
+	{
+		dealWithVideoFrameHW(&v4l2_buf);
 	}
 	else
 	{
-		dealWithVideoFrameSW(&buf);
+		dealWithVideoFrameSW(&v4l2_buf);
 	}
 	
     return true;
 }
 
-void V4L2CameraDevice::dealWithVideoFrameHW(v4l2_buffer * pBuf)
+void V4L2CameraDevice::dealWithVideoFrameHW(V4L2BUF_t * pBuf)
 {
 	bool ret = false;
-	
-	/* Timestamp the current frame, and notify the camera HAL about new frame. */
-	// mCurFrameTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);
-	mCurFrameTimestamp = (int64_t)((int64_t)pBuf->timestamp.tv_usec + (((int64_t)pBuf->timestamp.tv_sec) * 1000000));
-
-	// V4L2BUF_t for preview and HW encoder
-	V4L2BUF_t v4l2_buf;
-	v4l2_buf.addrPhyY	= pBuf->m.offset;
-	v4l2_buf.index		= pBuf->index;
-	v4l2_buf.timeStamp	= mCurFrameTimestamp;
-	
-	// LOGV("DQBUF: id: %d, time: %lld", buf.index, mCurFrameTimestamp);
 
 	// preview this buffer
-	ret = mCameraHAL->onNextFramePreview(&v4l2_buf, mCurFrameTimestamp, this, true);
-	if (!ret)
+	if (mPreviewUseHW)
 	{
-		releasePreviewFrame(pBuf->index);
-		mPreviewUseSW = true;
-		return ;
+		ret = mCameraHAL->onNextFramePreview(pBuf, mCurFrameTimestamp, this, true);
+		if (!ret)
+		{
+			releasePreviewFrame(pBuf->index);
+			mPreviewUseHW = false;
+			return ;
+		}
 	}
-	
-	// callback this buffer
-	mCameraHAL->onNextFrameCB(&v4l2_buf, mCurFrameTimestamp, this, true);
+	else
+	{
+		if (isPreviewTime())
+		{
+			// copy buffer
+			memcpy(mCurrentFrame, mMapMem.mem[pBuf->index], mMapMem.length); 
+			mCameraHAL->onNextFramePreview(mCurrentFrame, mCurFrameTimestamp, this, false);
+		}
+	}
 
-	// release this frame in preview
+	// callback this buffer
+	mCameraHAL->onNextFrameCB(pBuf, mCurFrameTimestamp, this, true);
+
+	// release this frame in preview, should be released by app when recording
 	releasePreviewFrame(pBuf->index);
 }
 
-void V4L2CameraDevice::dealWithVideoFrameSW(v4l2_buffer * pBuf)
+void V4L2CameraDevice::dealWithVideoFrameSW(V4L2BUF_t * pBuf)
 {
-	/* Timestamp the current frame, and notify the camera HAL about new frame. */
-	// mCurFrameTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);
-	mCurFrameTimestamp = (int64_t)((int64_t)pBuf->timestamp.tv_usec + (((int64_t)pBuf->timestamp.tv_sec) * 1000000));
-
-	// V4L2BUF_t for preview and HW encoder
-	V4L2BUF_t v4l2_buf;
-	v4l2_buf.addrPhyY	= pBuf->m.offset;
-	v4l2_buf.index		= pBuf->index;
-	v4l2_buf.timeStamp	= mCurFrameTimestamp;
+	bool ret = false;
 	
-	// LOGV("DQBUF: id: %d, time: %lld", buf.index, mCurFrameTimestamp);
-
-// #define FOR_TEST
-#ifdef FOR_TEST
-	static int cnt = 0;
-	if(!(cnt++ % 2))
-		goto GOON;
-#endif
-
 	// copy buffer
-	memcpy(mCurrentFrame, mMapMem.mem[pBuf->index], pBuf->length); 
+	memcpy(mCurrentFrame, mMapMem.mem[pBuf->index], mMapMem.length); 
 
-	mCameraHAL->onNextFramePreview(mCurrentFrame, mCurFrameTimestamp, this, false);
+	// preview this buffer
+	if (mPreviewUseHW)
+	{
+		ret = mCameraHAL->onNextFramePreview(pBuf, mCurFrameTimestamp, this, true);
+		if (!ret)
+		{
+			releasePreviewFrame(pBuf->index);
+			mPreviewUseHW = false;
+			return ;
+		}
+	}
+	else
+	{
+		if (isPreviewTime())
+		{			
+			mCameraHAL->onNextFramePreview(mCurrentFrame, mCurFrameTimestamp, this, false);
+		}
+	}
 
-    mCameraHAL->onNextFrameCB(mCurrentFrame, mCurFrameTimestamp, this, false);
+	// callback this buffer
+	mCameraHAL->onNextFrameCB(mCurrentFrame, mCurFrameTimestamp, this, false);
 
-#ifdef FOR_TEST
-GOON:
-#endif
+	releasePreviewFrame(pBuf->index);
+}
+
+void V4L2CameraDevice::dealWithVideoFrameTest(V4L2BUF_t * pBuf)
+{
+	// copy buffer
+	memcpy(mCurrentFrame, mMapMem.mem[pBuf->index], mMapMem.length); 
+	// mCurrentFrame = (uint8_t*)mMapMem.mem[pBuf->index];
+	// LOGV("mCurrentFrame: %x", mCurrentFrame);
+	mCameraHAL->onNextFrameAvailable(mCurrentFrame, mCurFrameTimestamp, this, false);
 
 	releasePreviewFrame(pBuf->index);
 }
@@ -348,9 +407,11 @@ void V4L2CameraDevice::closeCameraDev()
 
 int V4L2CameraDevice::v4l2SetVideoParams(int width, int height, uint32_t pix_fmt)
 {
-	F_LOG;
 	int ret = UNKNOWN_ERROR;
-	struct v4l2_format format; 
+	struct v4l2_format format;
+
+	LOGV("%s, line: %d, w: %d, h: %d, pfmt: %d", 
+		__FUNCTION__, __LINE__, width, height, pix_fmt);
 	
 	memset(&format, 0, sizeof(format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
@@ -368,7 +429,8 @@ int V4L2CameraDevice::v4l2SetVideoParams(int width, int height, uint32_t pix_fmt
 	
 	mFrameWidth = format.fmt.pix.width;
 	mFrameHeight= format.fmt.pix.height;
-	LOGV("camera params: w: %d, h: %d, pfmt: %d, pfield: %d", width, height, pix_fmt, V4L2_FIELD_NONE);
+	LOGV("camera params: w: %d, h: %d, pfmt: %d, pfield: %d", 
+		mFrameWidth, mFrameHeight, pix_fmt, V4L2_FIELD_NONE);
 
 	return OK;
 }
@@ -378,11 +440,22 @@ int V4L2CameraDevice::v4l2ReqBufs()
 	F_LOG;
 	int ret = UNKNOWN_ERROR;
 	struct v4l2_requestbuffers rb; 
+
+	if (mTakingPicture)
+	{
+		mBufferCnt = 2;
+	}
+	else
+	{
+		mBufferCnt = NB_BUFFER;
+	}
+
+	LOGD("TO VIDIOC_REQBUFS count: %d", mBufferCnt);
 	
 	memset(&rb, 0, sizeof(rb));
     rb.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
     rb.memory = V4L2_MEMORY_MMAP; 
-    rb.count  = NB_BUFFER; 
+    rb.count  = mBufferCnt; 
 	
 	ret = ioctl(mCamFd, VIDIOC_REQBUFS, &rb); 
     if (ret < 0) 
@@ -390,7 +463,12 @@ int V4L2CameraDevice::v4l2ReqBufs()
         LOGE("Init: VIDIOC_REQBUFS failed: %s", strerror(errno)); 
 		return ret;
     } 
-	LOGV("VIDIOC_REQBUFS count: %d", rb.count);
+
+	if (mBufferCnt != rb.count)
+	{
+		mBufferCnt = rb.count;
+		LOGD("VIDIOC_REQBUFS count: %d", mBufferCnt);
+	}
 
 	return OK;
 }
@@ -401,7 +479,7 @@ int V4L2CameraDevice::v4l2QueryBuf()
 	int ret = UNKNOWN_ERROR;
 	struct v4l2_buffer buf;
 	
-	for (int i = 0; i < NB_BUFFER; i++) 
+	for (int i = 0; i < mBufferCnt; i++) 
 	{  
         memset (&buf, 0, sizeof (struct v4l2_buffer)); 
 		buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
@@ -454,8 +532,6 @@ int V4L2CameraDevice::v4l2StartStreaming()
 		return ret; 
 	} 
 
-	F_LOG;
-
 	return OK;
 }
 
@@ -481,7 +557,7 @@ int V4L2CameraDevice::v4l2UnmapBuf()
 	F_LOG;
 	int ret = UNKNOWN_ERROR;
 	
-	for (int i = 0; i < NB_BUFFER; i++) 
+	for (int i = 0; i < mBufferCnt; i++) 
 	{
 		ret = munmap(mMapMem.mem[i], mMapMem.length);
         if (ret < 0) 
@@ -601,9 +677,16 @@ int V4L2CameraDevice::getFrameRate()
 	int numerator = parms.parm.capture.timeperframe.numerator;
 	int denominator = parms.parm.capture.timeperframe.denominator;
 	
-	LOGD("frame rate: numerator = %d, denominator = %d\n", numerator, denominator);
+	LOGV("frame rate: numerator = %d, denominator = %d\n", numerator, denominator);
 
 	return denominator / numerator;
+}
+
+int V4L2CameraDevice::setCameraFacing(int facing)
+{
+	mCameraFacing = facing;
+
+	return OK;
 }
 
 int V4L2CameraDevice::setImageEffect(int effect)
@@ -674,5 +757,18 @@ int V4L2CameraDevice::setFlashMode(int mode)
 	return ret;
 }
 
+
+bool V4L2CameraDevice::isPreviewTime()
+{
+	// F_LOG;
+    timeval cur_time;
+    gettimeofday(&cur_time, NULL);
+    const uint64_t cur_mks = cur_time.tv_sec * 1000000LL + cur_time.tv_usec;
+    if ((cur_mks - mLastPreviewed) >= mPreviewAfter) {
+        mLastPreviewed = cur_mks;
+        return true;
+    }
+    return false;
+}
 
 }; /* namespace android */

@@ -19,9 +19,9 @@
  * converter between NV21, and JPEG formats.
  */
 
-#define LOG_NDEBUG 0
-#define LOG_TAG "EmulatedCamera_JPEG"
-#include <cutils/log.h>
+#define LOG_TAG "Camera_JPEG"
+#include "CameraDebug.h"
+
 #include "JpegCompressor.h"
 
 namespace android {

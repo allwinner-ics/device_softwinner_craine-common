@@ -68,10 +68,10 @@ AccelSensor::AccelSensor()
         mEnabled |= 1<<Accelerometer;
         #ifdef GSENSOR_XY_REVERT
         if (!ioctl(data_fd, EVIOCGABS(EVENT_TYPE_ACCEL_Y), &absinfo)) {
-            mPendingEvents[Accelerometer].acceleration.x = absinfo.value * CONVERT_A_Y;
+            mPendingEvents[Accelerometer].acceleration.x = absinfo.value * CONVERT_A_X;
         }
         if (!ioctl(data_fd, EVIOCGABS(EVENT_TYPE_ACCEL_X), &absinfo)) {
-            mPendingEvents[Accelerometer].acceleration.y = absinfo.value * CONVERT_A_X;
+            mPendingEvents[Accelerometer].acceleration.y = absinfo.value * CONVERT_A_Y;
         }        
         #else
         if (!ioctl(data_fd, EVIOCGABS(EVENT_TYPE_ACCEL_X), &absinfo)) {
@@ -281,11 +281,11 @@ void AccelSensor::processEvent(int code, int value)
     	#ifdef GSENSOR_XY_REVERT
         case EVENT_TYPE_ACCEL_Y:
             mPendingMask |= 1<<Accelerometer;
-            mPendingEvents[Accelerometer].acceleration.x = value * CONVERT_A_Y;
+            mPendingEvents[Accelerometer].acceleration.x = value * CONVERT_A_X;
             break;
         case EVENT_TYPE_ACCEL_X:
             mPendingMask |= 1<<Accelerometer;
-            mPendingEvents[Accelerometer].acceleration.y = value * CONVERT_A_X;
+            mPendingEvents[Accelerometer].acceleration.y = value * CONVERT_A_Y;
             break;    	
     	#else
         case EVENT_TYPE_ACCEL_X:

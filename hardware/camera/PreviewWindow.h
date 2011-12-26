@@ -136,10 +136,6 @@ protected:
      */
     bool adjustPreviewDimensions(V4L2Camera* camera_dev);
 
-    /* Checks if it's the time to push new frame to the preview window.
-     * Note that this method must be called while object is locked. */
-    bool isPreviewTime();
-
     /***************************************************************************
      * Data members
      **************************************************************************/
@@ -151,17 +147,9 @@ protected:
     /* Preview window instance. */
     preview_stream_ops*             mPreviewWindow;
 
-    /* Timestamp (abs. microseconds) when last frame has been pushed to the
-     * preview window. */
-    uint64_t                        mLastPreviewed;
-
-    /* Preview frequency in microseconds. */
-    uint32_t                        mPreviewAfter;
-
     /*
      * Cached preview window frame dimensions.
      */
-
     int                             mPreviewFrameWidth;
     int                             mPreviewFrameHeight;
 
@@ -175,11 +163,15 @@ protected:
 public:
 	// hide or show HW layer
 	int showLayer(bool on);
+	int setLayerFormat(int fmt);
+	int setScreenID(int id);
 
 protected:
 	bool							mOverlayFirstFrame;
 	bool							mShouldAdjustDimensions;
 	int								mLayerShowHW;
+	int								mLayerFormat;
+	int								mScreenID;
 };
 
 }; /* namespace android */

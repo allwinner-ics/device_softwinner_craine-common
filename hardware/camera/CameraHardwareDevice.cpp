@@ -19,14 +19,12 @@
  * functionality of a fake camera.
  */
 
-#define LOG_NDEBUG 0
 #define LOG_TAG "CameraHardwareDevice"
-#include <cutils/log.h>
+#include "CameraDebug.h"
+
 #include <cutils/properties.h>
 #include "CameraHardwareDevice.h"
 #include "HALCameraFactory.h"
-
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
 
 namespace android {
 
@@ -72,22 +70,10 @@ status_t CameraHardwareDevice::Initialize()
 	// note: device id is not the same as camera id
 	char * pDevice = mCameraConfig->cameraDevice();
 	int deviceId = mCameraConfig->getDeviceID();
+	int cameraFacing = mCameraConfig->cameraFacing();
 	mV4L2CameraDevice->setV4L2DeviceName(pDevice);
 	mV4L2CameraDevice->setV4L2DeviceID(deviceId);
-
-	if (mCameraID == 0)
-	{
-	    mParameters.set(CameraHardware::FACING_KEY, CameraHardware::FACING_BACK);
-	    LOGD("%s: Fake camera is facing %s", __FUNCTION__, CameraHardware::FACING_BACK);
-	}
-	else
-	{
-	    mParameters.set(CameraHardware::FACING_KEY, CameraHardware::FACING_FRONT);
-	    LOGD("%s: Fake camera is facing %s", __FUNCTION__, CameraHardware::FACING_FRONT);
-	}
-
-    mParameters.set(CameraHardware::ORIENTATION_KEY,
-                    gEmulatedCameraFactory.getFakeCameraOrientation());
+	mV4L2CameraDevice->setCameraFacing(cameraFacing);
 
     res = CameraHardware::Initialize();
     if (res != NO_ERROR) {
@@ -97,12 +83,7 @@ status_t CameraHardwareDevice::Initialize()
     /*
      * Parameters provided by the camera device.
      */
-#if 0
-    mParameters.set(CameraParameters::KEY_SUPPORTED_PICTURE_SIZES, "640x480");
-    mParameters.set(CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES, "640x480");
-    mParameters.setPreviewSize(640, 480);
-    mParameters.setPictureSize(640, 480);
-#endif
+     
     return NO_ERROR;
 }
 

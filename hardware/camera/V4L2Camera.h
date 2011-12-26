@@ -33,7 +33,7 @@ namespace android {
 
 #define DEVICE_BACK		"/dev/video0"
 #define DEVICE_FRONT	"/dev/video1"
-#define NB_BUFFER 5
+#define NB_BUFFER 4
 
 class CameraHardware;
 
@@ -496,10 +496,20 @@ protected:
 	// -------------------------------------------------------------------------
 	
 protected:
-	int mPictureWidth;
-	int mPictureHeight;
+	bool						mTakingPicture;
+	int							mPictureWidth;
+	int							mPictureHeight;
+
+	// add for CTS
+	int64_t						mStartDeliverTimeUs;
 
 public:
+	
+	inline void setTakingPicture(bool taking)
+	{
+		mTakingPicture = taking;
+	}
+	
 	inline int getPictureSize(int * pic_w, int * pic_h)
     {
         *pic_w = mPictureWidth;

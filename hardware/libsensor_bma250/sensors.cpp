@@ -141,11 +141,11 @@ static int poll__poll(struct sensors_poll_device_t *device,
 				#ifdef GSENSOR_XY_REVERT
 			case ABS_Y:
 				data->acceleration.x =
-						event.value * CONVERT_Y;
+						event.value * CONVERT_X;
 				break;
 			case ABS_X:
 				data->acceleration.y =
-						event.value * CONVERT_X;
+						event.value * CONVERT_Y;
 				break;				
 				#else
 			case ABS_X:

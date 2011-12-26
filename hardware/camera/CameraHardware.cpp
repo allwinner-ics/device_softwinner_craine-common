@@ -23,11 +23,11 @@
  * API.
  */
 
-#define LOG_NDEBUG 0
 #define LOG_TAG "CameraHardware"
-#include <cutils/log.h>
-#include <ui/Rect.h>
+#include "CameraDebug.h"
 
+#include <ui/Rect.h>
+#include <drv_display_sun4i.h>
 #include <videodev2.h>
 #include "CameraHardware.h"
 #include "V4L2CameraDevice.h"
@@ -35,8 +35,6 @@
 
 /* Defines whether we should trace parameter changes. */
 #define DEBUG_PARAM 1
-
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
 
 namespace android {
 
@@ -66,7 +64,8 @@ CameraHardware::CameraHardware(int cameraId, struct hw_module_t* module)
         : mPreviewWindow(),
           mCallbackNotifier(),
           mCameraID(cameraId),
-          mCameraConfig(NULL)
+          mCameraConfig(NULL),
+          bPixFmtNV12(false)
 {
     /*
      * Initialize camera_device descriptor for this object.
@@ -123,6 +122,19 @@ void CameraHardware::initDefaultParameters()
 
 	LOGV("CameraHardware::initDefaultParameters");
 	
+	if (mCameraConfig->cameraFacing() == CAMERA_FACING_BACK)
+	{
+	    p.set(CameraHardware::FACING_KEY, CameraHardware::FACING_BACK);
+	    LOGV("%s: camera is facing %s", __FUNCTION__, CameraHardware::FACING_BACK);
+	}
+	else
+	{
+	    p.set(CameraHardware::FACING_KEY, CameraHardware::FACING_FRONT);
+	    LOGV("%s: camera is facing %s", __FUNCTION__, CameraHardware::FACING_FRONT);
+	}
+	
+    p.set(CameraHardware::ORIENTATION_KEY, 0);
+	
 	LOGV("to init preview size");
 	// preview size
 	if (mCameraConfig->supportPreviewSize())
@@ -136,10 +148,6 @@ void CameraHardware::initDefaultParameters()
 		p.set(CameraParameters::KEY_PREVIEW_SIZE, value);
 		p.set(CameraParameters::KEY_VIDEO_SIZE, value);
 		p.set(CameraParameters::KEY_PREFERRED_PREVIEW_SIZE_FOR_VIDEO, value);
-		
-		p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
-	
-		p.setPreviewFormat(CameraParameters::PIXEL_FORMAT_YUV420SP);
 	}
 
 	LOGV("to init picture size");
@@ -164,8 +172,8 @@ void CameraHardware::initDefaultParameters()
 		p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES, value);
 		LOGV("supportFrameRateValue: [%s] %s", CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES, value);
 
-		p.set(CameraParameters::KEY_PREVIEW_FPS_RANGE, "15000,30000");				// add temp for some app
-		p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE, "(15000,30000)");	// add temp for some app
+		p.set(CameraParameters::KEY_PREVIEW_FPS_RANGE, "5000,30000");				// add temp for CTS
+		p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE, "(5000,30000)");	// add temp for CTS
 
 		value = mCameraConfig->defaultFrameRateValue();
 		p.set(CameraParameters::KEY_PREVIEW_FRAME_RATE, value);
@@ -183,9 +191,10 @@ void CameraHardware::initDefaultParameters()
 	else
 	{
 		// add for CTS
-		p.set(CameraParameters::KEY_SUPPORTED_FOCUS_MODES, CameraParameters::FOCUS_MODE_FIXED);
-		p.set(CameraParameters::KEY_FOCUS_MODE, CameraParameters::FOCUS_MODE_FIXED);
+		p.set(CameraParameters::KEY_SUPPORTED_FOCUS_MODES, CameraParameters::FOCUS_MODE_AUTO);
+		p.set(CameraParameters::KEY_FOCUS_MODE, CameraParameters::FOCUS_MODE_AUTO);
 		p.set(CameraParameters::KEY_FOCAL_LENGTH, "3.43");
+		p.set(CameraParameters::KEY_FOCUS_DISTANCES, "0.10,1.20,Infinity");
 	}
 
 	LOGV("to init color effect");
@@ -244,6 +253,13 @@ void CameraHardware::initDefaultParameters()
 		value = mCameraConfig->defaultExposureCompensationValue();
 		p.set(CameraParameters::KEY_EXPOSURE_COMPENSATION, value);
 	}
+	else
+	{
+		p.set(CameraParameters::KEY_MIN_EXPOSURE_COMPENSATION, "0");
+		p.set(CameraParameters::KEY_MAX_EXPOSURE_COMPENSATION, "0");
+		p.set(CameraParameters::KEY_EXPOSURE_COMPENSATION_STEP, "0");
+		p.set(CameraParameters::KEY_EXPOSURE_COMPENSATION, "0");
+	}
 
 	LOGV("to init zoom");
 	// zoom
@@ -264,24 +280,29 @@ void CameraHardware::initDefaultParameters()
 		value = mCameraConfig->defaultZoomValue();
 		p.set(CameraParameters::KEY_ZOOM, value);
 	}
-	
-	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS,
-          CameraParameters::PIXEL_FORMAT_YUV420SP);
-    p.set(CameraParameters::KEY_SUPPORTED_PICTURE_FORMATS,
-          CameraParameters::PIXEL_FORMAT_JPEG);
-    p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT,
-          CameraParameters::PIXEL_FORMAT_YUV420SP);
-	
 
+
+	// preview formats, CTS must support at least 2 formats
+	parameterString = CameraParameters::PIXEL_FORMAT_YUV420SP;
+	parameterString.append(",");
+	parameterString.append(CameraParameters::PIXEL_FORMAT_YUV420P);
+	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS, parameterString.string());
+	
+	p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
+	p.set(CameraParameters::KEY_PREVIEW_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
+
+    p.set(CameraParameters::KEY_SUPPORTED_PICTURE_FORMATS, CameraParameters::PIXEL_FORMAT_JPEG);
+    p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
+	
 	p.set(CameraParameters::KEY_JPEG_QUALITY, "90"); // maximum quality
 	p.set(CameraParameters::KEY_SUPPORTED_JPEG_THUMBNAIL_SIZES, "320x240,0x0");
 	p.set(CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH, "320");
 	p.set(CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT, "240");
 	p.set(CameraParameters::KEY_JPEG_THUMBNAIL_QUALITY, "90");
-	
+
 	// rotation
 	p.set(CameraParameters::KEY_ROTATION, 0);
-	
+		
 	// add for CTS
 	p.set(CameraParameters::KEY_HORIZONTAL_VIEW_ANGLE, "51.2");
     p.set(CameraParameters::KEY_VERTICAL_VIEW_ANGLE, "39.4");
@@ -329,6 +350,11 @@ void CameraHardware::onNextFrameCB(const void* frame,
 {
 	/* Notify callback notifier next. */
     mCallbackNotifier.onNextFrameAvailable(frame, timestamp, camera_dev, bUseMataData);
+}
+
+void CameraHardware::onTakingPicture(const void* frame, V4L2Camera* camera_dev, bool bUseMataData)
+{
+	mCallbackNotifier.takePicture(frame, camera_dev, bUseMataData);
 }
 
 void CameraHardware::onCameraDeviceError(int err)
@@ -400,7 +426,7 @@ status_t CameraHardware::setPreviewWindow(struct preview_stream_ops* window)
 {
 	F_LOG;
     /* Callback should return a negative errno. */
-    return -mPreviewWindow.setPreviewWindow(window,
+	return -mPreviewWindow.setPreviewWindow(window,
                                              mParameters.getPreviewFrameRate());
 }
 
@@ -462,6 +488,23 @@ status_t CameraHardware::storeMetaDataInBuffers(int enable)
 status_t CameraHardware::startRecording()
 {
 	F_LOG;
+
+	bPixFmtNV12 = true;
+	
+	// get video size
+	int new_video_width = 0;
+	int new_video_height = 0;
+	mParameters.getVideoSize(&new_video_width, &new_video_height);
+	
+	if (mCurPreviewWidth != new_video_width
+		|| mCurPreviewHeight != new_video_height
+		|| bPixFmtNV12)
+	{
+		doStopPreview();
+		mPreviewWindow.showLayer(false);
+		doStartPreview();
+	}
+	
     /* Callback should return a negative errno. */
     return -mCallbackNotifier.enableVideoRecording(mParameters.getPreviewFrameRate());
 }
@@ -470,6 +513,8 @@ void CameraHardware::stopRecording()
 {
 	F_LOG;
     mCallbackNotifier.disableVideoRecording();
+	bPixFmtNV12 = false;
+//	mCallbackNotifier.storeMetaDataInBuffers(false);
 }
 
 int CameraHardware::isRecordingEnabled()
@@ -488,8 +533,7 @@ status_t CameraHardware::setAutoFocus()
 {
     LOGV("%s", __FUNCTION__);
 
-    /* TODO: Future enhancements. */
-    return NO_ERROR;
+    return mCallbackNotifier.autoFocus();
 }
 
 status_t CameraHardware::cancelAutoFocus()
@@ -503,7 +547,7 @@ status_t CameraHardware::cancelAutoFocus()
 status_t CameraHardware::takePicture()
 {
     LOGV("%s", __FUNCTION__);
-		
+
     status_t res;
     int pic_width, pic_height, frame_width, frame_height;
     uint32_t org_fmt;
@@ -513,7 +557,7 @@ status_t CameraHardware::takePicture()
 	frame_width = pic_width;
 	frame_height = pic_height;
 	getCameraDevice()->tryFmtSize(&frame_width, &frame_height);
-	mParameters.setPreviewSize(frame_width, frame_height);
+	// mParameters.setPreviewSize(frame_width, frame_height);
 	LOGD("%s, pic_size: %dx%d, frame_size: %dx%d", 
 		__FUNCTION__, pic_width, pic_height, frame_width, frame_height);
 
@@ -537,6 +581,12 @@ status_t CameraHardware::takePicture()
     int jpeg_quality = mParameters.getInt(CameraParameters::KEY_JPEG_QUALITY);
     if (jpeg_quality <= 0) {
         jpeg_quality = 90;  /* Fall back to default. */
+    }
+
+	/* Get JPEG rotate. */
+    int jpeg_rotate = mParameters.getInt(CameraParameters::KEY_ROTATION);
+    if (jpeg_rotate <= 0) {
+        jpeg_rotate = 0;  /* Fall back to default. */
     }
 
     /*
@@ -565,6 +615,7 @@ status_t CameraHardware::takePicture()
 	// close layer before taking picture, 
 	mPreviewWindow.showLayer(false);
 	
+	camera_dev->setTakingPicture(true);
     /* Start camera device for the picture frame. */
     LOGD("Starting camera for picture: %.4s(%s)[%dx%d]",
          reinterpret_cast<const char*>(&org_fmt), pix_fmt, frame_width, frame_height);
@@ -578,6 +629,7 @@ status_t CameraHardware::takePicture()
 	
     /* Deliver one frame only. */
     mCallbackNotifier.setJpegQuality(jpeg_quality);
+	mCallbackNotifier.setJpegRotate(jpeg_rotate);
     mCallbackNotifier.setTakingPicture(true);
     // res = camera_dev->startDeliveringFrames(true);	
 	res = camera_dev->startDeliveringFrames(false);		// star modify
@@ -587,7 +639,7 @@ status_t CameraHardware::takePicture()
             doStartPreview();
         }
     }
-		
+	
     return res;
 }
 
@@ -616,16 +668,24 @@ status_t CameraHardware::setParameters(const char* p)
 		return UNKNOWN_ERROR;
 	}
 
-	if (strcmp(params.getPreviewFormat(), CameraParameters::PIXEL_FORMAT_YUV420SP) != 0) 
+	// preview format
+	const char * new_preview_format = params.getPreviewFormat();
+	LOGD("new_preview_format : %s", new_preview_format);
+	if (strcmp(new_preview_format, CameraParameters::PIXEL_FORMAT_YUV420SP) == 0
+		|| strcmp(new_preview_format, CameraParameters::PIXEL_FORMAT_YUV420P) == 0) 
+	{
+		mParameters.setPreviewFormat(new_preview_format);
+	}
+	else
     {
-        LOGE("Only yuv420sp preview is supported");
-        return BAD_TYPE;
+        LOGE("Only yuv420sp or yuv420p preview is supported");
+        return -EINVAL;
     }
 
 	if (strcmp(params.getPictureFormat(), CameraParameters::PIXEL_FORMAT_JPEG) != 0) 
     {
         LOGE("Only jpeg still pictures are supported");
-        return BAD_TYPE;
+        return -EINVAL;
     }
 
 	// picture size
@@ -635,24 +695,21 @@ status_t CameraHardware::setParameters(const char* p)
     LOGV("%s : new_picture_width x new_picture_height = %dx%d", __FUNCTION__, new_picture_width, new_picture_height);
     if (0 < new_picture_width && 0 < new_picture_height) 
 	{
-#if 0
-		ret = pV4L2Device->tryFmtSize(&new_picture_width, &new_picture_height);
-		if(ret < 0)
-		{
-			return ret;
-		}
-#endif
 		mParameters.setPictureSize(new_picture_width, new_picture_height);
     }
+	else
+	{
+		LOGE("error picture size");
+		return -EINVAL;
+	}
 
-	// preview size & video size
+	// preview size
     int new_preview_width  = 0;
     int new_preview_height = 0;
     params.getPreviewSize(&new_preview_width, &new_preview_height);
-    const char *new_str_preview_format = params.getPreviewFormat();
-    LOGV("%s : new_preview_width x new_preview_height = %dx%d, format = %s",
-         __FUNCTION__, new_preview_width, new_preview_height, new_str_preview_format);
-	if (0 < new_preview_width && 0 < new_preview_height && new_str_preview_format != NULL)
+    LOGV("%s : new_preview_width x new_preview_height = %dx%d",
+         __FUNCTION__, new_preview_width, new_preview_height);
+	if (0 < new_preview_width && 0 < new_preview_height)
 	{
 		// try size
 		ret = pV4L2Device->tryFmtSize(&new_preview_width, &new_preview_height);
@@ -662,12 +719,28 @@ status_t CameraHardware::setParameters(const char* p)
 		}
 		
 		mParameters.setPreviewSize(new_preview_width, new_preview_height);
-		mParameters.setPreviewFormat(new_str_preview_format);
+		mParameters.setVideoSize(new_preview_width, new_preview_height);
+	}
+	else
+	{
+		LOGE("error preview size");
+		return -EINVAL;
 	}
 
-	
 	// frame rate
-	pV4L2Device->getFrameRate();
+	int new_min_frame_rate, new_max_frame_rate;
+	params.getPreviewFpsRange(&new_min_frame_rate, &new_max_frame_rate);
+	int new_preview_frame_rate = params.getPreviewFrameRate();
+	if (0 < new_preview_frame_rate && 0 < new_min_frame_rate 
+		&& new_min_frame_rate <= new_max_frame_rate)
+	{
+		mParameters.setPreviewFrameRate(pV4L2Device->getFrameRate());
+	}
+	else
+	{
+		LOGE("error preview frame rate");
+		return -EINVAL;
+	}
 
 	// JPEG image quality
     int new_jpeg_quality = params.getInt(CameraParameters::KEY_JPEG_QUALITY);
@@ -676,6 +749,11 @@ status_t CameraHardware::setParameters(const char* p)
 	{
 		mParameters.set(CameraParameters::KEY_JPEG_QUALITY, new_jpeg_quality);
     }
+	else
+	{
+		LOGE("error picture quality");
+		return -EINVAL;
+	}
 
 	// rotation	
 	int new_rotation = params.getInt(CameraParameters::KEY_ROTATION);
@@ -684,6 +762,11 @@ status_t CameraHardware::setParameters(const char* p)
 	{
         mParameters.set(CameraParameters::KEY_ROTATION, new_rotation);
     }
+	else
+	{
+		LOGE("error rotate");
+		return -EINVAL;
+	}
 
 	// image effect
 	if (mCameraConfig->supportColorEffect())
@@ -705,13 +788,13 @@ status_t CameraHardware::setParameters(const char* p)
 	            new_image_effect = V4L2_COLORFX_NEGATIVE;
 	        else {
 	            //posterize, whiteboard, blackboard, solarize
-	            LOGE("ERR(%s):Invalid effect(%s)", __func__, new_image_effect_str);
+	            LOGE("ERR(%s):Invalid effect(%s)", __FUNCTION__, new_image_effect_str);
 	            ret = UNKNOWN_ERROR;
 	        }
 
 	        if (new_image_effect >= 0) {
 	            if (pV4L2Device->setImageEffect(new_image_effect) < 0) {
-	                LOGE("ERR(%s):Fail on mV4L2Camera->setImageEffect(effect(%d))", __func__, new_image_effect);
+	                LOGE("ERR(%s):Fail on mV4L2Camera->setImageEffect(effect(%d))", __FUNCTION__, new_image_effect);
 	                ret = UNKNOWN_ERROR;
 	            } else {
 	                mParameters.set(CameraParameters::KEY_EFFECT, new_image_effect_str);
@@ -746,7 +829,7 @@ status_t CameraHardware::setParameters(const char* p)
 	                         CameraParameters::WHITE_BALANCE_WARM_FLUORESCENT))
 	            new_white = V4L2_WB_TUNGSTEN;
 	        else{
-	            LOGE("ERR(%s):Invalid white balance(%s)", __func__, new_white_str); //twilight, shade
+	            LOGE("ERR(%s):Invalid white balance(%s)", __FUNCTION__, new_white_str); //twilight, shade
 	            ret = UNKNOWN_ERROR;
 	        }
 
@@ -754,7 +837,7 @@ status_t CameraHardware::setParameters(const char* p)
 			{
 	            if (pV4L2Device->setWhiteBalance(new_white) < 0) 
 				{
-	                LOGE("ERR(%s):Fail on mV4L2Camera->setWhiteBalance(white(%d))", __func__, new_white);
+	                LOGE("ERR(%s):Fail on mV4L2Camera->setWhiteBalance(white(%d))", __FUNCTION__, new_white);
 	                ret = UNKNOWN_ERROR;
 	            } 
 				else 
@@ -771,11 +854,11 @@ status_t CameraHardware::setParameters(const char* p)
 		int new_exposure_compensation = params.getInt(CameraParameters::KEY_EXPOSURE_COMPENSATION);
 		int max_exposure_compensation = params.getInt(CameraParameters::KEY_MAX_EXPOSURE_COMPENSATION);
 		int min_exposure_compensation = params.getInt(CameraParameters::KEY_MIN_EXPOSURE_COMPENSATION);
-		LOGV("%s : new_exposure_compensation %d", __func__, new_exposure_compensation);
+		LOGV("%s : new_exposure_compensation %d", __FUNCTION__, new_exposure_compensation);
 		if ((min_exposure_compensation <= new_exposure_compensation) &&
 			(max_exposure_compensation >= new_exposure_compensation)) {
 			if (pV4L2Device->setExposure(new_exposure_compensation) < 0) {
-				LOGE("ERR(%s):Fail on mV4L2Camera->setBrightness(brightness(%d))", __func__, new_exposure_compensation);
+				LOGE("ERR(%s):Fail on mV4L2Camera->setBrightness(brightness(%d))", __FUNCTION__, new_exposure_compensation);
 				ret = UNKNOWN_ERROR;
 			} else {
 				mParameters.set(CameraParameters::KEY_EXPOSURE_COMPENSATION, new_exposure_compensation);
@@ -796,6 +879,14 @@ status_t CameraHardware::setParameters(const char* p)
 		int new_zoom = params.getInt(CameraParameters::KEY_ZOOM);
 		LOGV("new_zoom: %d", new_zoom);
 		mParameters.set(CameraParameters::KEY_ZOOM, new_zoom);
+	}
+
+	// focus
+	const char *new_focus_mode_str = params.get(CameraParameters::KEY_FOCUS_MODE);
+	if (strcmp(new_focus_mode_str, CameraParameters::FOCUS_MODE_AUTO))
+	{
+		LOGE("invalid focus mode: %s", new_focus_mode_str);
+		return -EINVAL;
 	}
 	
     return NO_ERROR;
@@ -835,7 +926,11 @@ status_t CameraHardware::sendCommand(int32_t cmd, int32_t arg1, int32_t arg2)
     LOGV("%s: cmd = %d, arg1 = %d, arg2 = %d", __FUNCTION__, cmd, arg1, arg2);
 
     /* TODO: Future enhancements. */
-    return 0;
+
+	// CAMERA_CMD_START_FACE_DETECTION
+	// CAMERA_CMD_STOP_FACE_DETECTION
+	
+    return -EINVAL;
 }
 
 void CameraHardware::releaseCamera()
@@ -922,7 +1017,15 @@ status_t CameraHardware::doStartPreview()
     } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_RGBA8888) == 0) {
         org_fmt = V4L2_PIX_FMT_RGB32;
     } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_YUV420SP) == 0) {
-        org_fmt = V4L2_PIX_FMT_NV12;
+    	if (bPixFmtNV12) {
+			LOGV("============== DISP_SEQ_UVUV");
+			mPreviewWindow.setLayerFormat(DISP_SEQ_UVUV);
+        	org_fmt = V4L2_PIX_FMT_NV12;		// for HW encoder
+    	} else {
+	    	LOGV("============== DISP_SEQ_VUVU");
+			mPreviewWindow.setLayerFormat(DISP_SEQ_VUVU);
+        	org_fmt = V4L2_PIX_FMT_NV21;		// for some apps
+    	}
     } else {
         LOGE("%s: Unsupported pixel format %s", __FUNCTION__, pix_fmt);
         mPreviewWindow.stopPreview();
@@ -937,6 +1040,10 @@ status_t CameraHardware::doStartPreview()
         return res;
     }
 
+	// save current preview size
+	mCurPreviewWidth = width;
+	mCurPreviewHeight = height;
+
     res = camera_dev->startDeliveringFrames(false);
     if (res != NO_ERROR) {
         camera_dev->stopDevice();
@@ -950,6 +1057,9 @@ status_t CameraHardware::doStopPreview()
 {
     LOGV("%s", __FUNCTION__);
 
+	// set layer off can avoid Flicker
+	mPreviewWindow.showLayer(false);
+	
     status_t res = NO_ERROR;
     if (mPreviewWindow.isPreviewEnabled()) {
         /* Stop the camera. */
@@ -977,6 +1087,12 @@ status_t CameraHardware::cleanupCamera()
 
     status_t res = NO_ERROR;
 
+	// usleep(1000000);
+
+	// reset preview format to yuv420sp
+	mParameters.set(CameraParameters::KEY_PREVIEW_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
+	mCallbackNotifier.storeMetaDataInBuffers(false);
+	
     /* If preview is running - stop it. */
     res = doStopPreview();
     if (res != NO_ERROR) {

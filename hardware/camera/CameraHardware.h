@@ -432,8 +432,15 @@ public:
 	void initDefaultParameters();
 	bool isUseMetaDataBufferMode();
 
+	void onTakingPicture(const void* frame, V4L2Camera* camera_dev, bool bUseMataData);
+
 protected:
 	CCameraConfig * mCameraConfig;
+
+	int mCurPreviewWidth;
+	int mCurPreviewHeight;
+
+	bool bPixFmtNV12;	// true for NV12, false for NV21
 };
 
 }; /* namespace android */

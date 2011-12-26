@@ -160,11 +160,11 @@ public:
                               V4L2Camera* camera_dev,
                               bool bUseMataData);
 
-	void onNextFrameUseMetaDataBufferMode(const void* frame,
+	void onNextFrameHW(const void* frame,
                               nsecs_t timestamp,
                               V4L2Camera* camera_dev);
 
-	void onNextFrameNotUseMetaDataBufferMode(const void* frame,
+	void onNextFrameSW(const void* frame,
                               nsecs_t timestamp,
                               V4L2Camera* camera_dev);
 
@@ -241,13 +241,28 @@ protected:
 	// -------------------------------------------------------------------------
 
 public:
-	bool isUseMetaDataBufferMode()
+	inline bool isUseMetaDataBufferMode()
 	{
 		return mUseMetaDataBufferMode;
 	}
+
+	// Sets JPEG rotate used to compress frame during picture taking.
+    inline void setJpegRotate(int jpeg_rotate)
+    {
+        mJpegRotate = jpeg_rotate;
+    }
+	
+	status_t autoFocus();
+
+	void takePicture(const void* frame, V4L2Camera* camera_dev, bool bUseMataData);
+	void takePictureHW(const void* frame, V4L2Camera* camera_dev);
+	void takePictureSW(const void* frame, V4L2Camera* camera_dev);
 	
 protected:
 	bool 							mUseMetaDataBufferMode;
+
+	// JPEG rotate used to compress frame during picture taking.
+	int								mJpegRotate;
 };
 
 }; /* namespace android */

@@ -19,9 +19,9 @@
  * via set_callbacks, enable_msg_type, and disable_msg_type camera HAL API.
  */
 
-#define LOG_NDEBUG 0
 #define LOG_TAG "CallbackNotifier"
-#include <cutils/log.h>
+#include "CameraDebug.h"
+
 #include <media/stagefright/MetadataBufferType.h>
 #include <type_camera.h>
 #include "V4L2Camera.h"
@@ -29,8 +29,6 @@
 #include "JpegCompressor.h"
 
 extern "C" int JpegEnc(void * pBufOut, int * bufSize, JPEG_ENC_t *jpeg_enc);
-
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
 
 namespace android {
 
@@ -101,7 +99,7 @@ CallbackNotifier::CallbackNotifier()
       mJpegQuality(90),
       mVideoRecEnabled(false),
       mTakingPicture(false),
-      mUseMetaDataBufferMode(true)
+      mUseMetaDataBufferMode(false)
 {
 }
 
@@ -183,7 +181,7 @@ void CallbackNotifier::releaseRecordingFrame(const void* opaque)
 status_t CallbackNotifier::storeMetaDataInBuffers(bool enable)
 {
     /* Return INVALID_OPERATION means HAL does not support metadata. So HAL will
-     * return actual frame data with CAMERA_MSG_VIDEO_FRRAME. Return
+     * return actual frame data with CAMERA_MSG_VIDEO_FRAME. Return
      * INVALID_OPERATION to mean metadata is not supported. */
      
 	LOGD("storeMetaDataInBuffers, %s", enable ? "true" : "false");
@@ -217,19 +215,19 @@ void CallbackNotifier::onNextFrameAvailable(const void* frame,
                                             V4L2Camera* camera_dev,
                                          	bool bUseMataData)
 {
-    if (mUseMetaDataBufferMode)
+    if (bUseMataData)
     {
-    	onNextFrameUseMetaDataBufferMode(frame, timestamp, camera_dev);
+    	onNextFrameHW(frame, timestamp, camera_dev);
     }
 	else
 	{
-    	onNextFrameNotUseMetaDataBufferMode(frame, timestamp, camera_dev);
+    	onNextFrameSW(frame, timestamp, camera_dev);
 	}
 }
 
-void CallbackNotifier::onNextFrameUseMetaDataBufferMode(const void* frame,
-							                            nsecs_t timestamp,
-							                            V4L2Camera* camera_dev)
+void CallbackNotifier::onNextFrameHW(const void* frame,
+			                            nsecs_t timestamp,
+			                            V4L2Camera* camera_dev)
 {
 	if (isMessageEnabled(CAMERA_MSG_VIDEO_FRAME) && isVideoRecordingEnabled() &&
             isNewVideoFrameTime(timestamp)) 
@@ -254,8 +252,7 @@ void CallbackNotifier::onNextFrameUseMetaDataBufferMode(const void* frame,
         if (NULL != cam_buff && NULL != cam_buff->data) 
 		{
             memcpy(cam_buff->data, frame, sizeof(V4L2BUF_t));
-            mDataCBTimestamp(timestamp, CAMERA_MSG_VIDEO_FRAME,
-                               cam_buff, 0, mCallbackCookie);
+			mDataCB(CAMERA_MSG_PREVIEW_FRAME, cam_buff, 0, NULL, mCallbackCookie);
 			cam_buff->release(cam_buff);
         } 
 		else 
@@ -263,108 +260,11 @@ void CallbackNotifier::onNextFrameUseMetaDataBufferMode(const void* frame,
             LOGE("%s: Memory failure in CAMERA_MSG_PREVIEW_FRAME", __FUNCTION__);
         }
     }
-
-    if (mTakingPicture) 
-	{
-		LOGD("taking photo begin");
-        /* This happens just once. */
-        mTakingPicture = false;
-        /* The sequence of callbacks during picture taking is:
-         *  - CAMERA_MSG_SHUTTER
-         *  - CAMERA_MSG_RAW_IMAGE_NOTIFY
-         *  - CAMERA_MSG_COMPRESSED_IMAGE
-         */
-        if (isMessageEnabled(CAMERA_MSG_SHUTTER)) 
-		{
-			F_LOG;
-            mNotifyCB(CAMERA_MSG_SHUTTER, 0, 0, mCallbackCookie);
-        }
-		
-        if (isMessageEnabled(CAMERA_MSG_RAW_IMAGE_NOTIFY)) 
-		{
-			F_LOG;
-            mNotifyCB(CAMERA_MSG_RAW_IMAGE_NOTIFY, 0, 0, mCallbackCookie);
-        }
-		
-        if (isMessageEnabled(CAMERA_MSG_COMPRESSED_IMAGE)) 
-		{
-			V4L2BUF_t * pbuf = (V4L2BUF_t *)frame;
-			void * pOutBuf = NULL;
-			int bufSize = 0;
-			int pic_w, pic_h;
-
-			camera_dev->getPictureSize(&pic_w, &pic_h);
-				
-            JPEG_ENC_t jpeg_enc;
-			memset(&jpeg_enc, 0, sizeof(jpeg_enc));
-			jpeg_enc.addrY = pbuf->addrPhyY;
-			jpeg_enc.addrC = pbuf->addrPhyY + camera_dev->getFrameWidth() * camera_dev->getFrameHeight();
-			jpeg_enc.src_w = camera_dev->getFrameWidth();
-			jpeg_enc.src_h = camera_dev->getFrameHeight();
-			jpeg_enc.pic_w = pic_w;
-			jpeg_enc.pic_h = pic_h;
-			jpeg_enc.colorFormat = JPEG_COLOR_YUV420;
-			jpeg_enc.quality = mJpegQuality;
-
-			pOutBuf = (void *)malloc(jpeg_enc.pic_w * jpeg_enc.pic_h << 2);
-			if (pOutBuf == NULL)
-			{
-				LOGE("malloc picture memory failed");
-				return ;
-			}
-			
-			int ret = JpegEnc(pOutBuf, &bufSize, &jpeg_enc);
-			if (ret < 0)
-			{
-				LOGE("JpegEnc failed");
-				return ;			
-			}
-
-			camera_memory_t* jpeg_buff = mGetMemoryCB(-1, bufSize, 1, NULL);
-			if (NULL != jpeg_buff && NULL != jpeg_buff->data) 
-			{
-				memcpy(jpeg_buff->data, (uint8_t *)pOutBuf, bufSize); 
-				mDataCB(CAMERA_MSG_COMPRESSED_IMAGE, jpeg_buff, 0, NULL, mCallbackCookie);
-				jpeg_buff->release(jpeg_buff);
-			} 
-			else 
-			{
-				LOGE("%s: Memory failure in CAMERA_MSG_VIDEO_FRAME", __FUNCTION__);
-			}
-
-			if(pOutBuf != NULL)
-			{
-				free(pOutBuf);
-				pOutBuf = NULL;
-			}
-        }
-
-		LOGD("taking photo to CAMERA_MSG_POSTVIEW_FRAME");
-
-		if (isMessageEnabled(CAMERA_MSG_POSTVIEW_FRAME) )
-		{
-			F_LOG;
-			camera_memory_t* cam_buff =
-            	mGetMemoryCB(-1, camera_dev->getFrameBufferSize(), 1, NULL);
-	        if (NULL != cam_buff && NULL != cam_buff->data) 
-			{
-	            memset(cam_buff->data, 0xff, camera_dev->getFrameBufferSize());
-				mDataCB(CAMERA_MSG_POSTVIEW_FRAME, cam_buff, 0, NULL, mCallbackCookie);
-	            cam_buff->release(cam_buff);
-	        } 
-			else 
-			{
-	            LOGE("%s: Memory failure in CAMERA_MSG_PREVIEW_FRAME", __FUNCTION__);
-	        }
-		}
-		
-		LOGD("taking photo end");
-    }
 }
 
-void CallbackNotifier::onNextFrameNotUseMetaDataBufferMode(const void* frame,
-							                               nsecs_t timestamp,
-							                               V4L2Camera* camera_dev)
+void CallbackNotifier::onNextFrameSW(const void* frame,
+		                               nsecs_t timestamp,
+		                               V4L2Camera* camera_dev)
 {
 	if (isMessageEnabled(CAMERA_MSG_VIDEO_FRAME) && isVideoRecordingEnabled() &&
             isNewVideoFrameTime(timestamp)) {
@@ -391,42 +291,177 @@ void CallbackNotifier::onNextFrameNotUseMetaDataBufferMode(const void* frame,
             LOGE("%s: Memory failure in CAMERA_MSG_PREVIEW_FRAME", __FUNCTION__);
         }
     }
+}
 
-    if (mTakingPicture) {
-        /* This happens just once. */
-        mTakingPicture = false;
-        /* The sequence of callbacks during picture taking is:
-         *  - CAMERA_MSG_SHUTTER
-         *  - CAMERA_MSG_RAW_IMAGE_NOTIFY
-         *  - CAMERA_MSG_COMPRESSED_IMAGE
-         */
-        if (isMessageEnabled(CAMERA_MSG_SHUTTER)) {
-            mNotifyCB(CAMERA_MSG_SHUTTER, 0, 0, mCallbackCookie);
+status_t CallbackNotifier::autoFocus()
+{
+	if (isMessageEnabled(CAMERA_MSG_FOCUS))
+        mNotifyCB(CAMERA_MSG_FOCUS, true, 0, mCallbackCookie);
+    return NO_ERROR;
+}
+
+void CallbackNotifier::takePicture(const void* frame, V4L2Camera* camera_dev, bool bUseMataData)
+{
+	if (bUseMataData)
+	{
+		takePictureHW(frame, camera_dev);
+	}
+	else
+	{
+		takePictureSW(frame, camera_dev);
+	}
+}
+
+void CallbackNotifier::takePictureHW(const void* frame, V4L2Camera* camera_dev)
+{
+	if (!mTakingPicture) 
+	{
+		return ;
+	}
+	
+	LOGD("%s, taking photo begin", __FUNCTION__);
+    /* This happens just once. */
+    mTakingPicture = false;
+    /* The sequence of callbacks during picture taking is:
+     *  - CAMERA_MSG_SHUTTER
+     *  - CAMERA_MSG_RAW_IMAGE_NOTIFY
+     *  - CAMERA_MSG_COMPRESSED_IMAGE
+     */
+    if (isMessageEnabled(CAMERA_MSG_SHUTTER)) 
+	{
+		F_LOG;
+        mNotifyCB(CAMERA_MSG_SHUTTER, 0, 0, mCallbackCookie);
+    }
+	
+    if (isMessageEnabled(CAMERA_MSG_RAW_IMAGE_NOTIFY)) 
+	{
+		F_LOG;
+        mNotifyCB(CAMERA_MSG_RAW_IMAGE_NOTIFY, 0, 0, mCallbackCookie);
+    }
+	
+    if (isMessageEnabled(CAMERA_MSG_COMPRESSED_IMAGE)) 
+	{
+		V4L2BUF_t * pbuf = (V4L2BUF_t *)frame;
+		void * pOutBuf = NULL;
+		int bufSize = 0;
+		int pic_w, pic_h;
+
+		camera_dev->getPictureSize(&pic_w, &pic_h);
+			
+        JPEG_ENC_t jpeg_enc;
+		memset(&jpeg_enc, 0, sizeof(jpeg_enc));
+		jpeg_enc.addrY = pbuf->addrPhyY;
+		jpeg_enc.addrC = pbuf->addrPhyY + camera_dev->getFrameWidth() * camera_dev->getFrameHeight();
+		jpeg_enc.src_w = camera_dev->getFrameWidth();
+		jpeg_enc.src_h = camera_dev->getFrameHeight();
+		jpeg_enc.pic_w = pic_w;
+		jpeg_enc.pic_h = pic_h;
+		jpeg_enc.colorFormat = JPEG_COLOR_YUV420;
+		jpeg_enc.quality = mJpegQuality;
+		jpeg_enc.rotate = mJpegRotate;
+		
+		LOGD("addrY: %x, src: %dx%d, pic: %dx%d, quality: %d, rotate: %d", 
+			jpeg_enc.addrY, 
+			jpeg_enc.src_w, jpeg_enc.src_h,
+			jpeg_enc.pic_w, jpeg_enc.pic_h,
+			jpeg_enc.quality, jpeg_enc.rotate);
+
+		pOutBuf = (void *)malloc(jpeg_enc.pic_w * jpeg_enc.pic_h << 2);
+		if (pOutBuf == NULL)
+		{
+			LOGE("malloc picture memory failed");
+			return ;
+		}
+		
+		int ret = JpegEnc(pOutBuf, &bufSize, &jpeg_enc);
+		if (ret < 0)
+		{
+			LOGE("JpegEnc failed");
+			return ;			
+		}
+
+		camera_memory_t* jpeg_buff = mGetMemoryCB(-1, bufSize, 1, NULL);
+		if (NULL != jpeg_buff && NULL != jpeg_buff->data) 
+		{
+			memcpy(jpeg_buff->data, (uint8_t *)pOutBuf, bufSize); 
+			mDataCB(CAMERA_MSG_COMPRESSED_IMAGE, jpeg_buff, 0, NULL, mCallbackCookie);
+			jpeg_buff->release(jpeg_buff);
+		} 
+		else 
+		{
+			LOGE("%s: Memory failure in CAMERA_MSG_COMPRESSED_IMAGE", __FUNCTION__);
+		}
+
+		if(pOutBuf != NULL)
+		{
+			free(pOutBuf);
+			pOutBuf = NULL;
+		}
+    }
+
+	LOGD("taking photo to CAMERA_MSG_POSTVIEW_FRAME");
+
+	if (isMessageEnabled(CAMERA_MSG_POSTVIEW_FRAME) )
+	{
+		F_LOG;
+		camera_memory_t* cam_buff =
+        	mGetMemoryCB(-1, camera_dev->getFrameBufferSize(), 1, NULL);
+        if (NULL != cam_buff && NULL != cam_buff->data) 
+		{
+            memset(cam_buff->data, 0xff, camera_dev->getFrameBufferSize());
+			mDataCB(CAMERA_MSG_POSTVIEW_FRAME, cam_buff, 0, NULL, mCallbackCookie);
+            cam_buff->release(cam_buff);
+        } 
+		else 
+		{
+            LOGE("%s: Memory failure in CAMERA_MSG_PREVIEW_FRAME", __FUNCTION__);
         }
-        if (isMessageEnabled(CAMERA_MSG_RAW_IMAGE_NOTIFY)) {
-            mNotifyCB(CAMERA_MSG_RAW_IMAGE_NOTIFY, 0, 0, mCallbackCookie);
-        }
-        if (isMessageEnabled(CAMERA_MSG_COMPRESSED_IMAGE)) {
-            /* Compress the frame to JPEG. Note that when taking pictures, we
-             * have requested camera device to provide us with NV21 frames. */
-            NV21JpegCompressor compressor;
-            status_t res =
-                compressor.compressRawImage(frame, camera_dev->getFrameWidth(),
-                                            camera_dev->getFrameHeight(),
-                                            mJpegQuality);
-            if (res == NO_ERROR) {
-                camera_memory_t* jpeg_buff =
-                    mGetMemoryCB(-1, compressor.getCompressedSize(), 1, NULL);
-                if (NULL != jpeg_buff && NULL != jpeg_buff->data) {
-                    compressor.getCompressedImage(jpeg_buff->data);
-                    mDataCB(CAMERA_MSG_COMPRESSED_IMAGE, jpeg_buff, 0, NULL, mCallbackCookie);
-                    jpeg_buff->release(jpeg_buff);
-                } else {
-                    LOGE("%s: Memory failure in CAMERA_MSG_VIDEO_FRAME", __FUNCTION__);
-                }
+	}
+	
+	LOGD("taking photo end");
+}
+
+void CallbackNotifier::takePictureSW(const void* frame, V4L2Camera* camera_dev)
+{
+	if (!mTakingPicture) 
+	{
+		return ;
+	}
+	
+	LOGD("%s, taking photo begin", __FUNCTION__);
+    /* This happens just once. */
+    mTakingPicture = false;
+    /* The sequence of callbacks during picture taking is:
+     *  - CAMERA_MSG_SHUTTER
+     *  - CAMERA_MSG_RAW_IMAGE_NOTIFY
+     *  - CAMERA_MSG_COMPRESSED_IMAGE
+     */
+    if (isMessageEnabled(CAMERA_MSG_SHUTTER)) {
+        mNotifyCB(CAMERA_MSG_SHUTTER, 0, 0, mCallbackCookie);
+    }
+    if (isMessageEnabled(CAMERA_MSG_RAW_IMAGE_NOTIFY)) {
+        mNotifyCB(CAMERA_MSG_RAW_IMAGE_NOTIFY, 0, 0, mCallbackCookie);
+    }
+    if (isMessageEnabled(CAMERA_MSG_COMPRESSED_IMAGE)) {
+        /* Compress the frame to JPEG. Note that when taking pictures, we
+         * have requested camera device to provide us with NV21 frames. */
+        NV21JpegCompressor compressor;
+        status_t res =
+            compressor.compressRawImage(frame, camera_dev->getFrameWidth(),
+                                        camera_dev->getFrameHeight(),
+                                        mJpegQuality);
+        if (res == NO_ERROR) {
+            camera_memory_t* jpeg_buff =
+                mGetMemoryCB(-1, compressor.getCompressedSize(), 1, NULL);
+            if (NULL != jpeg_buff && NULL != jpeg_buff->data) {
+                compressor.getCompressedImage(jpeg_buff->data);
+                mDataCB(CAMERA_MSG_COMPRESSED_IMAGE, jpeg_buff, 0, NULL, mCallbackCookie);
+                jpeg_buff->release(jpeg_buff);
             } else {
-                LOGE("%s: Compression failure in CAMERA_MSG_VIDEO_FRAME", __FUNCTION__);
+                LOGE("%s: Memory failure in CAMERA_MSG_COMPRESSED_IMAGE", __FUNCTION__);
             }
+        } else {
+            LOGE("%s: Compression failure in CAMERA_MSG_COMPRESSED_IMAGE", __FUNCTION__);
         }
     }
 }

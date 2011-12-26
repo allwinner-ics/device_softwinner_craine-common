@@ -18,9 +18,9 @@
  * Contains implemenation of framebuffer conversion routines.
  */
 
-#define LOG_NDEBUG 0
-#define LOG_TAG "EmulatedCamera_Converter"
-#include <cutils/log.h>
+#define LOG_TAG "Camera_Converter"
+#include "CameraDebug.h"
+
 #include "Converters.h"
 
 namespace android {

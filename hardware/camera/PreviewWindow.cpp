@@ -19,9 +19,9 @@
  * functionality of a preview window set via set_preview_window camera HAL API.
  */
 
-#define LOG_NDEBUG 0
 #define LOG_TAG "PreviewWindow"
-#include <cutils/log.h>
+#include "CameraDebug.h"
+
 #include <ui/Rect.h>
 #include <ui/GraphicBufferMapper.h>
 #include <type_camera.h>
@@ -29,18 +29,17 @@
 #include "V4L2Camera.h"
 #include "PreviewWindow.h"
 
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
-
 namespace android {
 
 PreviewWindow::PreviewWindow()
     : mPreviewWindow(NULL),
-      mLastPreviewed(0),
       mPreviewFrameWidth(0),
       mPreviewFrameHeight(0),
       mPreviewEnabled(false),
+      mOverlayFirstFrame(true),
       mShouldAdjustDimensions(true),
-      mOverlayFirstFrame(true)
+      mLayerFormat(-1),
+      mScreenID(0)
 {
 	F_LOG;
 }
@@ -58,24 +57,19 @@ status_t PreviewWindow::setPreviewWindow(struct preview_stream_ops* window,
                                          int preview_fps)
 {
     LOGV("%s: current: %p -> new: %p", __FUNCTION__, mPreviewWindow, window);
-
+	
     status_t res = NO_ERROR;
     Mutex::Autolock locker(&mObjectLock);
 
     /* Reset preview info. */
     mPreviewFrameWidth = mPreviewFrameHeight = 0;
-    mPreviewAfter = 0;
-    mLastPreviewed = 0;
 
     if (window != NULL) {
         /* The CPU will write each frame to the preview window buffer.
          * Note that we delay setting preview window buffer geometry until
          * frames start to come in. */
         res = window->set_usage(window, GRALLOC_USAGE_SW_WRITE_OFTEN);
-        if (res == NO_ERROR) {
-            /* Set preview frequency. */
-            mPreviewAfter = 1000000 / preview_fps;
-        } else {
+        if (res != NO_ERROR) {
             window = NULL;
             res = -res; // set_usage returns a negative errno.
             LOGE("%s: Error setting preview window usage %d -> %s",
@@ -140,9 +134,9 @@ bool PreviewWindow::onNextFrameAvailableHW(const void* frame,
     }
 	
     /* Make sure that preview window dimensions are OK with the camera device */
-    if (mShouldAdjustDimensions || adjustPreviewDimensions(camera_dev)) 
+    if (adjustPreviewDimensions(camera_dev) || mShouldAdjustDimensions) 
 	{
-        LOGV("%s: Adjusting preview windows %p geometry to %dx%d",
+        LOGD("%s: Adjusting preview windows %p geometry to %dx%d",
              __FUNCTION__, mPreviewWindow, mPreviewFrameWidth,
              mPreviewFrameHeight);
         res = mPreviewWindow->set_buffers_geometryex(mPreviewWindow,
@@ -157,6 +151,8 @@ bool PreviewWindow::onNextFrameAvailableHW(const void* frame,
 			mShouldAdjustDimensions = true;
             return false;
         }
+
+		mPreviewWindow->perform(mPreviewWindow, NATIVE_WINDOW_SETPARAMETER, HWC_LAYER_SETFORMAT, mLayerFormat);
 		mShouldAdjustDimensions = false;
     }
 
@@ -207,16 +203,19 @@ bool PreviewWindow::onNextFrameAvailableSW(const void* frame,
     int res;
     Mutex::Autolock locker(&mObjectLock);
 
-    if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {
+	// LOGD("%s, timestamp: %lld", __FUNCTION__, timestamp);
+
+    if (!isPreviewEnabled() || mPreviewWindow == NULL) 
+	{
         return true;
     }
 
     /* Make sure that preview window dimensions are OK with the camera device */
-    if (mShouldAdjustDimensions || adjustPreviewDimensions(camera_dev)) {
+    if (adjustPreviewDimensions(camera_dev) || mShouldAdjustDimensions) {
         /* Need to set / adjust buffer geometry for the preview window.
          * Note that in the emulator preview window uses only RGB for pixel
          * formats. */
-        LOGV("%s: Adjusting preview windows %p geometry to %dx%d",
+        LOGD("%s: Adjusting preview windows %p geometry to %dx%d",
              __FUNCTION__, mPreviewWindow, mPreviewFrameWidth,
              mPreviewFrameHeight);
         res = mPreviewWindow->set_buffers_geometry(mPreviewWindow,
@@ -304,19 +303,6 @@ bool PreviewWindow::adjustPreviewDimensions(V4L2Camera* camera_dev)
     return true;
 }
 
-bool PreviewWindow::isPreviewTime()
-{
-	// F_LOG;
-    timeval cur_time;
-    gettimeofday(&cur_time, NULL);
-    const uint64_t cur_mks = cur_time.tv_sec * 1000000LL + cur_time.tv_usec;
-    if ((cur_mks - mLastPreviewed) >= mPreviewAfter) {
-        mLastPreviewed = cur_mks;
-        return true;
-    }
-    return false;
-}
-
 int PreviewWindow::showLayer(bool on)
 {
 	LOGV("%s, %s", __FUNCTION__, on ? "on" : "off");
@@ -325,6 +311,22 @@ int PreviewWindow::showLayer(bool on)
 	{
 		mPreviewWindow->perform(mPreviewWindow, NATIVE_WINDOW_SETPARAMETER, HWC_LAYER_SHOW, mLayerShowHW);
 	}
+	return OK;
+}
+
+int PreviewWindow::setLayerFormat(int fmt)
+{
+	LOGV("%s, %d", __FUNCTION__, fmt);
+	mLayerFormat = fmt;	
+	mShouldAdjustDimensions = true;
+	return OK;
+}
+
+int PreviewWindow::setScreenID(int id)
+{
+	LOGV("%s, id: %d", __FUNCTION__, id);
+	mScreenID = id;
+	mShouldAdjustDimensions = true;
 	return OK;
 }
 

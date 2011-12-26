@@ -22,16 +22,12 @@
  *  - Streaming video
  *  - etc.
  */
-
-#define LOG_NDEBUG 0
 #define LOG_TAG "V4L2Camera"
+#include "CameraDebug.h"
 
-#include <cutils/log.h>
 #include <sys/select.h>
 #include "V4L2Camera.h"
 #include "Converters.h"
-
-#define F_LOG LOGV("%s, line: %d", __FUNCTION__, __LINE__);
 
 namespace android {
 
@@ -40,7 +36,9 @@ V4L2Camera::V4L2Camera(CameraHardware* camera_hal)
       mCurFrameTimestamp(0),
       mCameraHAL(camera_hal),
       mCurrentFrame(NULL),
-      mState(ECDS_CONSTRUCTED)
+      mState(ECDS_CONSTRUCTED),
+      mTakingPicture(false),
+      mStartDeliverTimeUs(0)
 {
 	F_LOG;
 }
@@ -83,6 +81,8 @@ status_t V4L2Camera::startDeliveringFrames(bool one_burst)
 {
     LOGV("%s", __FUNCTION__);
 
+	mStartDeliverTimeUs = systemTime() / 1000;
+
     if (!isStarted()) {
         LOGE("%s: Device is not started", __FUNCTION__);
         return EINVAL;
@@ -98,6 +98,14 @@ status_t V4L2Camera::stopDeliveringFrames()
 {
     LOGV("%s", __FUNCTION__);
 
+	// for CTS, V4L2Camera::WorkerThread::readyToRun must be called before stopDeliveringFrames
+	int64_t nowTimeUs = systemTime() / 1000;
+	if (nowTimeUs - mStartDeliverTimeUs < 1000000)
+	{
+		LOGW("should not stop preview so quickly, to delay 1 sec ......");
+		usleep(1000000);
+	}
+	
     if (!isStarted()) {
         LOGW("%s: Device is not started", __FUNCTION__);
         return NO_ERROR;
@@ -181,6 +189,7 @@ status_t V4L2Camera::commonStartDevice(int width,
     LOGV("%s: Allocated %p %d bytes for %d pixels in %.4s[%dx%d] frame",
          __FUNCTION__, mCurrentFrame, mFrameBufferSize, mTotalPixels,
          reinterpret_cast<const char*>(&mPixelFormat), mFrameWidth, mFrameHeight);
+
     return NO_ERROR;
 }
 
@@ -189,7 +198,7 @@ void V4L2Camera::commonStopDevice()
 	F_LOG;
     mFrameWidth = mFrameHeight = mTotalPixels = 0;
     mPixelFormat = 0;
-
+	
     if (mCurrentFrame != NULL) {
         delete[] mCurrentFrame;
         mCurrentFrame = NULL;

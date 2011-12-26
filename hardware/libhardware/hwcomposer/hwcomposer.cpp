@@ -62,6 +62,109 @@ hwc_module_t HAL_MODULE_INFO_SYM =
     }
 };
 
+static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
+{
+	int  						fbfh0;
+	__disp_colorkey_t 			ck;
+    int                         ret;
+    int                         fd;
+    
+	if(ctx->hwc_layer.currenthandle)
+	{
+		args[0]							= ctx->hwc_screen;
+		args[1]                 		= ctx->hwc_layer.currenthandle;
+		args[2]                 		= 0;
+		args[3]                 		= 0;
+		ret                     		= ioctl(ctx->dispfd, DISP_CMD_LAYER_TOP,args);
+		if(ret != 0)
+		{
+			//open display layer failed, need send play end command, and exit
+			LOGE("Set video display Top failed!\n");
+	
+			return NULL;
+		}
+		
+		args[0] 						= ctx->hwc_screen;
+		args[1] 						= ctx->hwc_layer.currenthandle;
+		if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
+        {
+		    ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_OFF,args);
+        }
+        else  //screen1 use colorkey
+        {
+		    ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_ON,args);
+        }
+	}
+	
+	
+	fbfh0 = open("/dev/graphics/fb0",O_RDWR);
+	if(fbfh0 < 0)
+	{
+		LOGE("open fb0 fail \n ");
+		
+		return -1;
+	}    
+	
+	ioctl(fbfh0,FBIOGET_LAYER_HDL_0,&fb_layer_hdl);
+	close(fbfh0);	
+
+    if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
+    {
+	    ck.ck_min.alpha 				= 0xff;
+    	ck.ck_min.red 					= 0x05; //0x01;
+    	ck.ck_min.green 				= 0x01; //0x03;
+    	ck.ck_min.blue 					= 0x07; //0x05;
+    	ck.ck_max.alpha 				= 0xff;
+    	ck.ck_max.red 					= 0x05; //0x01;
+    	ck.ck_max.green 				= 0x01; //0x03;
+    	ck.ck_max.blue 					= 0x07; //0x05;
+    }
+    else  //screen1 use colorkey
+    {
+	    ck.ck_min.alpha 				= 0xff;
+    	ck.ck_min.red 					= 0x00; //0x01;
+    	ck.ck_min.green 				= 0x00; //0x03;
+    	ck.ck_min.blue 					= 0x00; //0x05;
+    	ck.ck_max.alpha 				= 0xff;
+    	ck.ck_max.red 					= 0x00; //0x01;
+    	ck.ck_max.green 				= 0x00; //0x03;
+    	ck.ck_max.blue 					= 0x00; //0x05;
+    }
+	
+	ck.red_match_rule 				= 2;
+	ck.green_match_rule 			= 2;
+	ck.blue_match_rule 				= 2;
+	args[0] 						= 0;
+    args[1] 						= (unsigned long)&ck;
+    ioctl(ctx->dispfd,DISP_CMD_SET_COLORKEY,(void*)args);//pipe1, different with video layer's pipe
+
+	args[0] 						= ctx->hwc_screen;
+    args[1] 						= fb_layer_hdl;
+    args[2] 						= 0;
+    ioctl(ctx->dispfd,DISP_CMD_LAYER_SET_PIPE,(void*)args);//pipe1, different with video layer's pipe
+
+    args[0] 						= ctx->hwc_screen;
+    args[1] 						= fb_layer_hdl;
+    ioctl(ctx->dispfd,DISP_CMD_LAYER_TOP,(void*)args);
+
+    args[0] 						= ctx->hwc_screen;
+	args[1] 						= fb_layer_hdl;
+	args[2]             			= 0xFF;
+	ioctl(ctx->dispfd,DISP_CMD_LAYER_SET_ALPHA_VALUE,(void*)args);//disable the global alpha, use the pixel's alpha
+
+    args[0] 						= ctx->hwc_screen;
+    args[1] 						= fb_layer_hdl;
+    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
+
+	args[0]							= ctx->hwc_screen;
+    args[1] 						= fb_layer_hdl;
+    ioctl(ctx->dispfd,DISP_CMD_LAYER_CK_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
+
+	LOGI("layer open hdl:%d,ret :%d\n",(unsigned long)ctx->hwc_layer.currenthandle,ret);
+	
+	return 0;
+}
+
 static int hwc_requestlayer(sun4i_hwc_context_t *ctx,uint32_t screenid)
 {
 	uint32_t			layerhandle;
@@ -234,8 +337,23 @@ static void hwc_computerlayerdisplayframe(hwc_composer_device_t *dev)
 	    scn_h  = scn_w * temp_h/temp_w;
 	    temp_w = scn_w;
 	    temp_h = scn_h;
-	    temp_x = temp_x * curlayer->dispW/curlayer->org_dispW;
-	    temp_y = temp_y * curlayer->dispH/curlayer->org_dispH;
+        if(curlayer->posX_org == ((curlayer->org_dispW - curlayer->posW_org)>>1))
+	    {
+            temp_x = (curlayer->dispW - scn_w)>>1;
+        }
+        else
+        {
+            temp_x = temp_x * curlayer->dispW/curlayer->org_dispW;
+        }
+
+        if(curlayer->posY_org == ((curlayer->org_dispH - curlayer->posH_org)>>1))
+	    {
+            temp_y = (curlayer->dispH - scn_h)>>1;
+        }
+	    else
+	    {
+            temp_y = temp_y * curlayer->dispH/curlayer->org_dispH;
+        }
 	    
 	    if (temp_w < 16)
 	    {
@@ -343,15 +461,15 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
            ||(tmpLayerAttr.src_win.x != croprect->left)
            ||(tmpLayerAttr.src_win.y != croprect->top))
         {
-            tmpLayerAttr.fb.size.width 		= croprect->right - croprect->left;
-    		tmpLayerAttr.fb.size.height 	= croprect->bottom - croprect->top;
+            //tmpLayerAttr.fb.size.width 		= croprect->right - croprect->left;
+    		//tmpLayerAttr.fb.size.height 	= croprect->bottom - croprect->top;
 
-    		tmpLayerAttr.src_win.x			= croprect->left;
-    	    tmpLayerAttr.src_win.y			= croprect->top;
-    	    tmpLayerAttr.src_win.width		= croprect->right - croprect->left;
-    	    tmpLayerAttr.src_win.height		= croprect->bottom - croprect->top;
+    		//tmpLayerAttr.src_win.x			= croprect->left;
+    	    //tmpLayerAttr.src_win.y			= croprect->top;
+    	    //tmpLayerAttr.src_win.width		= croprect->right - croprect->left;
+    	    //tmpLayerAttr.src_win.height		= croprect->bottom - croprect->top;
 
-            needset = true;
+            //needset = true;
         }
 		if((ctx->hwc_layer.posX_org != displayframe->left)
            ||(ctx->hwc_layer.posY_org != displayframe->top)
@@ -376,26 +494,27 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
         if(needset)
         {
 		    ret = ioctl(fd, DISP_CMD_LAYER_SET_PARA, &tmp_args);
-			
-			if((!ctx->hwc_layeropen) && (!ctx->hwc_reqclose) && (ctx->hwc_frameset))
-		    {
-		    	args[0] 				= screen;
-				args[1] 				= (unsigned long)overlay;
-				args[2] 				= 0;
-				args[3] 				= 0;
-				ioctl(ctx->dispfd, DISP_CMD_LAYER_OPEN, args);
-				
-				//LOGV("------------------------------SET_PARA--0 addr0:%x addr1:%x ret:%d",layer_info.fb.addr[0],layer_info.fb.addr[1],ret);
-				args[0] 				= screen;
-				args[1] 				= (unsigned long)overlay;
-				args[2] 				= 0;
-				args[3] 				= 0;
-				ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
-				
-				ctx->hwc_layeropen = true;
-		    }
         }
 
+        if((ctx->hwc_layeropen == 0) && (ctx->hwc_reqclose == 0) && (ctx->hwc_frameset != 0))
+	    {
+            hwc_setcolorkey(ctx);
+            
+	    	args[0] 				= screen;
+			args[1] 				= (unsigned long)overlay;
+			args[2] 				= 0;
+			args[3] 				= 0;
+			ioctl(ctx->dispfd, DISP_CMD_LAYER_OPEN, args);
+			
+			//LOGV("------------------------------SET_PARA--0 addr0:%x addr1:%x ret:%d",layer_info.fb.addr[0],layer_info.fb.addr[1],ret);
+			args[0] 				= screen;
+			args[1] 				= (unsigned long)overlay;
+			args[2] 				= 0;
+			args[3] 				= 0;
+			ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
+			
+			ctx->hwc_layeropen = true;
+	    }
 	}
 
     return ret;
@@ -471,108 +590,6 @@ static int hwc_endset(hwc_composer_device_t *dev)
     return ioctl(ctx->dispfd,DISP_CMD_EXECUTE_CMD_AND_STOP_CACHE,(void*)args);//disable the global alpha, use the pixel's alpha
 }
 
-static int hwc_setcolorkey(sun4i_hwc_context_t  *ctx)
-{
-	int  						fbfh0;
-	__disp_colorkey_t 			ck;
-    int                         ret;
-    int                         fd;
-    
-	if(ctx->hwc_layer.currenthandle)
-	{
-		args[0]							= ctx->hwc_screen;
-		args[1]                 		= ctx->hwc_layer.currenthandle;
-		args[2]                 		= 0;
-		args[3]                 		= 0;
-		ret                     		= ioctl(ctx->dispfd, DISP_CMD_LAYER_TOP,args);
-		if(ret != 0)
-		{
-			//open display layer failed, need send play end command, and exit
-			LOGE("Set video display Top failed!\n");
-	
-			return NULL;
-		}
-		
-		args[0] 						= ctx->hwc_screen;
-		args[1] 						= ctx->hwc_layer.currenthandle;
-		if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
-        {
-		    ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_OFF,args);
-        }
-        else  //screen1 use colorkey
-        {
-		    ioctl(ctx->dispfd, DISP_CMD_LAYER_CK_ON,args);
-        }
-	}
-	
-	
-	fbfh0 = open("/dev/graphics/fb0",O_RDWR);
-	if(fbfh0 < 0)
-	{
-		LOGE("open fb0 fail \n ");
-		
-		return -1;
-	}    
-	
-	ioctl(fbfh0,FBIOGET_LAYER_HDL_0,&fb_layer_hdl);
-	close(fbfh0);	
-
-    if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
-    {
-	    ck.ck_min.alpha 				= 0xff;
-    	ck.ck_min.red 					= 0x05; //0x01;
-    	ck.ck_min.green 				= 0x01; //0x03;
-    	ck.ck_min.blue 					= 0x07; //0x05;
-    	ck.ck_max.alpha 				= 0xff;
-    	ck.ck_max.red 					= 0x05; //0x01;
-    	ck.ck_max.green 				= 0x01; //0x03;
-    	ck.ck_max.blue 					= 0x07; //0x05;
-    }
-    else  //screen1 use colorkey
-    {
-	    ck.ck_min.alpha 				= 0xff;
-    	ck.ck_min.red 					= 0x00; //0x01;
-    	ck.ck_min.green 				= 0x00; //0x03;
-    	ck.ck_min.blue 					= 0x00; //0x05;
-    	ck.ck_max.alpha 				= 0xff;
-    	ck.ck_max.red 					= 0x00; //0x01;
-    	ck.ck_max.green 				= 0x00; //0x03;
-    	ck.ck_max.blue 					= 0x00; //0x05;
-    }
-	
-	ck.red_match_rule 				= 2;
-	ck.green_match_rule 			= 2;
-	ck.blue_match_rule 				= 2;
-	args[0] 						= 0;
-    args[1] 						= (unsigned long)&ck;
-    ioctl(ctx->dispfd,DISP_CMD_SET_COLORKEY,(void*)args);//pipe1, different with video layer's pipe
-
-	args[0] 						= ctx->hwc_screen;
-    args[1] 						= fb_layer_hdl;
-    args[2] 						= 0;
-    ioctl(ctx->dispfd,DISP_CMD_LAYER_SET_PIPE,(void*)args);//pipe1, different with video layer's pipe
-
-    args[0] 						= ctx->hwc_screen;
-    args[1] 						= fb_layer_hdl;
-    ioctl(ctx->dispfd,DISP_CMD_LAYER_TOP,(void*)args);
-
-    args[0] 						= ctx->hwc_screen;
-	args[1] 						= fb_layer_hdl;
-	args[2]             			= 0xFF;
-	ioctl(ctx->dispfd,DISP_CMD_LAYER_SET_ALPHA_VALUE,(void*)args);//disable the global alpha, use the pixel's alpha
-
-    args[0] 						= ctx->hwc_screen;
-    args[1] 						= fb_layer_hdl;
-    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
-
-	args[0]							= ctx->hwc_screen;
-    args[1] 						= fb_layer_hdl;
-    ioctl(ctx->dispfd,DISP_CMD_LAYER_CK_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
-
-	LOGI("layer open hdl:%d,ret :%d\n",(unsigned long)ctx->hwc_layer.currenthandle,ret);
-	
-	return 0;
-}
 
 static int hwc_setlayerframepara(sun4i_hwc_context_t *ctx,uint32_t value)
 {
@@ -691,7 +708,15 @@ static int hwc_setlayerpara(sun4i_hwc_context_t *ctx,uint32_t value)
 	__disp_pixel_mod_t			fb_mode = DISP_MOD_MB_UV_COMBINED;
 	__disp_pixel_seq_t			disp_seq;
 	__disp_cs_mode_t			disp_cs_mode;
-
+	disp_seq = DISP_SEQ_UVUV;
+	if (height < 720)
+	{
+		tmpLayerAttr.fb.cs_mode 	= DISP_BT601;
+	}
+	else
+	{
+		tmpLayerAttr.fb.cs_mode 	= DISP_BT709;
+	}
 	switch(format)
 	{
 		case HWC_FORMAT_DEFAULT:
@@ -708,6 +733,12 @@ static int hwc_setlayerpara(sun4i_hwc_context_t *ctx,uint32_t value)
 			break;
 		case HWC_FORMAT_YUV420PLANAR:
 			disp_format = DISP_FORMAT_YUV420;
+			fb_mode = DISP_MOD_NON_MB_PLANAR;
+			disp_seq = DISP_SEQ_P3210;
+			disp_cs_mode	= DISP_YCC;
+			break;
+		case HWC_FORMAT_RGBA_8888:
+			disp_format = DISP_FORMAT_ARGB8888;
 			fb_mode = DISP_MOD_NON_MB_PLANAR;
 			disp_seq = DISP_SEQ_P3210;
 			disp_cs_mode	= DISP_YCC;
@@ -823,7 +854,6 @@ static int hwc_setlayerpara(sun4i_hwc_context_t *ctx,uint32_t value)
 	ctx->hwc_layer.posW_org			= 0;
 	ctx->hwc_layer.posH_org			= 0;
     ctx->hwc_frameset               = false;
-	hwc_setcolorkey(ctx);
 	return ret;
 }
 
@@ -855,8 +885,10 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
 				ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
 				
 				ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
-				
-				
+
+			    args[0] 						= ctx->hwc_screen;
+			    args[1] 						= fb_layer_hdl;
+			    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
 				
 				ctx->hwc_layeropen = true;
 			}
@@ -868,6 +900,10 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
 				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
 				
 				ioctl(fd, DISP_CMD_VIDEO_STOP, args);
+
+			    args[0] 						= ctx->hwc_screen;
+			    args[1] 						= fb_layer_hdl;
+			    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_ON,(void*)args);//disable the global alpha, use the pixel's alpha
 				ctx->hwc_layeropen = false;
 			}
 		}
@@ -912,6 +948,10 @@ static int hwc_reqshow(sun4i_hwc_context_t *ctx,int value)
 					ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
 					
 				    ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);				
+
+    			    args[0] 						= ctx->hwc_screen;
+    			    args[1] 						= fb_layer_hdl;
+    			    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
 					ctx->hwc_layeropen = true;
 				}
 				ctx->hwc_reqclose = false;
@@ -925,6 +965,34 @@ static int hwc_reqshow(sun4i_hwc_context_t *ctx,int value)
 				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
 				
 				ioctl(fd, DISP_CMD_VIDEO_STOP, args);
+
+			    args[0] 						= ctx->hwc_screen;
+			    args[1] 						= fb_layer_hdl;
+			    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_ON,(void*)args);//disable the global alpha, use the pixel's alpha
+				
+				args[0] 						= ctx->hwc_screen;
+	   			ret = ioctl(ctx->dispfd,DISP_CMD_GET_OUTPUT_TYPE,args);
+	   			if(ret == DISP_OUTPUT_TYPE_HDMI && (ctx->cur_3denable == true))
+	   			{
+	   				args[0] 					= ctx->hwc_screen;
+	   				args[1] 					= 0;
+	   				args[2] 					= 0;
+	   				args[3] 					= 0;
+	   				ioctl(ctx->dispfd,DISP_CMD_HDMI_OFF,(unsigned long)args);
+	   				
+	   				LOGV("ctx->cur_hdmimode %d",ctx->cur_hdmimode);
+	   				args[0] 					= ctx->hwc_screen;
+	   				args[1] 					= ctx->cur_hdmimode;
+	   				args[2] 					= 0;
+	   				args[3] 					= 0;
+	   				ioctl(ctx->dispfd, DISP_CMD_HDMI_SET_MODE, args);
+	   				
+	   				args[0] 					= ctx->hwc_screen;
+	   				args[1] 					= 0;
+	   				args[2] 					= 0;
+	   				args[3] 					= 0;
+	   				ioctl(ctx->dispfd,DISP_CMD_HDMI_ON,(unsigned long)args);
+	   			}
 				
 				ctx->hwc_layeropen = false;
 				ctx->hwc_reqclose = true;
@@ -1081,10 +1149,6 @@ static int hwc_setscreen(sun4i_hwc_context_t *ctx,uint32_t value)
 	layer_info.scn_win.width 		= ctx->hwc_layer.posW;
 	layer_info.scn_win.height 		= ctx->hwc_layer.posH;
 	//frame buffer pst and size information
-    layer_info.alpha_en           	= 0xff;
-    layer_info.alpha_val          	= 0xff;  
-    layer_info.pipe              	= 1;
-    layer_info.prio               	= 0xff;
     layer_info.b_from_screen		= false;
     
     layer_info.fb.b_trd_src 		= ctx->cur_half_enable;
@@ -1113,15 +1177,8 @@ static int hwc_setscreen(sun4i_hwc_context_t *ctx,uint32_t value)
 	args[2]                 		= 0;
 	args[3]                 		= 0;
 	ioctl(ctl_fd, DISP_CMD_LAYER_BOTTOM,args);
-	
-	if(ctx->hwc_screen == 0)  //screen0 use pixel alpha
-    {
-	    ioctl(ctl_fd, DISP_CMD_LAYER_CK_OFF,args);
-    }
-    else  //screen1 use colorkey
-    {
-	    ioctl(ctl_fd, DISP_CMD_LAYER_CK_ON,args);
-    }
+
+    hwc_setcolorkey(ctx);
 
 	args[0] 						= value;
 	args[1] 						= (unsigned long) overlayhandle;
@@ -1439,9 +1496,10 @@ static int hwc_set3dmode(sun4i_hwc_context_t *ctx,int para)
 	int 						value;
 	int 						mode;
 	int							is_mode_changed;
-	int *						tmp;
+	int i;
 	__disp_layer_info_t 		layer_info;
 	layerinitpara_t				layer_para;
+	video3Dinfo_t 				*_3d_info;
 
 	LOGV("overlay_show");
 
@@ -1450,10 +1508,10 @@ static int hwc_set3dmode(sun4i_hwc_context_t *ctx,int para)
 	overlay                         = (void *)ctx->hwc_layer.currenthandle;
     fd                          	= ctx->dispfd;
     screen                          = ctx->hwc_screen;
-	tmp 							= (int *)para;
-	value 							= tmp[3];
-	mode  							= tmp[4];
-	is_mode_changed 				= tmp[5];
+	_3d_info 						= (video3Dinfo_t *)para;
+	value 							= _3d_info->_3d_mode;
+	mode  							= _3d_info->display_mode;
+	is_mode_changed 				= _3d_info->is_mode_changed;
 
 	if(is_mode_changed)
 	{
@@ -1464,11 +1522,11 @@ static int hwc_set3dmode(sun4i_hwc_context_t *ctx,int para)
 		ioctl(fd, DISP_CMD_VIDEO_STOP, args);
 		ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
 	}
-	LOGV("%d, width %d, height %d, format %x, value %d, mode %d, is mode changed %d", __LINE__, tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]);
+	LOGV("width %d, height %d, format %x, value %d, mode %d, is mode changed %d", _3d_info->width, _3d_info->height, _3d_info->format, _3d_info->_3d_mode, _3d_info->display_mode, _3d_info->is_mode_changed);
           
-    layer_para.w  			= tmp[0];
-    layer_para.h  			= tmp[1];
-    layer_para.format  		= tmp[2];
+    layer_para.w  			= _3d_info->width;
+    layer_para.h  			= _3d_info->height;
+    layer_para.format  		= _3d_info->format;
     layer_para.screenid  	= screen;
 	hwc_setlayerpara(ctx, (uint32_t)&layer_para);
 
@@ -1674,6 +1732,8 @@ static int hwc_setparameter(hwc_composer_device_t *dev,uint32_t param,uint32_t v
     ctl_fd   = ctx->dispfd;	
     if(param == HWC_LAYER_SETINITPARA)
     {
+	    ctx->cur_3denable			= false;
+		ctx->cur_half_enable		= false;
     	ret = hwc_setlayerpara(ctx,value);
     }
     else if(param == HWC_LAYER_SETFRAMEPARA)
@@ -1816,6 +1876,7 @@ static int hwc_set(hwc_composer_device_t *dev,
 static int hwc_device_close(struct hw_device_t *dev)
 {
     sun4i_hwc_context_t* ctx = (sun4i_hwc_context_t*)dev;
+    int ret;
     if (ctx) 
     {
         if(ctx->hwc_layer.currenthandle)
@@ -1827,6 +1888,29 @@ static int hwc_device_close(struct hw_device_t *dev)
 
             ioctl(ctx->dispfd, DISP_CMD_LAYER_RELEASE,args);
         }
+        args[0] 						= ctx->hwc_screen;
+	    ret = ioctl(ctx->dispfd,DISP_CMD_GET_OUTPUT_TYPE,args);
+	    if(ret == DISP_OUTPUT_TYPE_HDMI && (ctx->cur_3denable == true))
+	    {
+	    	args[0] 					= ctx->hwc_screen;
+	    	args[1] 					= 0;
+	    	args[2] 					= 0;
+	    	args[3] 					= 0;
+	    	ioctl(ctx->dispfd,DISP_CMD_HDMI_OFF,(unsigned long)args);
+	    	
+	    	LOGV("ctx->cur_hdmimode %d",ctx->cur_hdmimode);
+	    	args[0] 					= ctx->hwc_screen;
+	    	args[1] 					= ctx->cur_hdmimode;
+	    	args[2] 					= 0;
+	    	args[3] 					= 0;
+	    	ioctl(ctx->dispfd, DISP_CMD_HDMI_SET_MODE, args);
+	    	
+	    	args[0] 					= ctx->hwc_screen;
+	    	args[1] 					= 0;
+	    	args[2] 					= 0;
+	    	args[3] 					= 0;
+	    	ioctl(ctx->dispfd,DISP_CMD_HDMI_ON,(unsigned long)args);
+	    }
         
         if(ctx->dispfd)
         {
