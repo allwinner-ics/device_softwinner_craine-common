@@ -17,6 +17,8 @@ PRODUCT_PACKAGES += \
 	libaudioutils \
 	libcedarxbase \
 	libcedarxosal \
+        libcedarv \
+        libswdrm \
 	Camera \
 	libjni_mosaic \
 	FileExplore \
