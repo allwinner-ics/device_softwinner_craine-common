@@ -17,8 +17,8 @@ PRODUCT_PACKAGES += \
 	libaudioutils \
 	libcedarxbase \
 	libcedarxosal \
-        libcedarv \
-        libswdrm \
+	libcedarv \
+	libswdrm \
 	Camera \
 	libjni_mosaic \
 	FileExplore \
@@ -82,7 +82,9 @@ PRODUCT_COPY_FILES += \
 	device/softwinner/crane-common/egl/libEGL_mali.so:system/lib/egl/libEGL_mali.so \
 	device/softwinner/crane-common/egl/libGLESv1_CM_mali.so:system/lib/egl/libGLESv1_CM_mali.so \
 	device/softwinner/crane-common/egl/libGLESv2_mali.so:system/lib/egl/libGLESv2_mali.so
-	
+
+PRODUCT_COPY_FILES += \
+	device/softwinner/crane-common/preinstall.sh:/system/bin/preinstall.sh 	
 
 #premission feature
 PRODUCT_COPY_FILES += \

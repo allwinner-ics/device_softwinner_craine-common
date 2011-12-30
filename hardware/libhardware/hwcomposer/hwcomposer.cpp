@@ -198,6 +198,8 @@ static int hwc_requestlayer(sun4i_hwc_context_t *ctx,uint32_t screenid)
 			
 			return -1;
 		}
+
+        LOGV("hwc_requestlayer layerhandle = %d\n",layerhandle);
 		
 		ctx->hwc_layer.currenthandle = layerhandle;
 		ctx->hwc_screen				 = screenid;
@@ -339,7 +341,14 @@ static void hwc_computerlayerdisplayframe(hwc_composer_device_t *dev)
 	    temp_h = scn_h;
         if(curlayer->posX_org == ((curlayer->org_dispW - curlayer->posW_org)>>1))
 	    {
-            temp_x = (curlayer->dispW - scn_w)>>1;
+            if(curlayer->dispW > (uint32_t)scn_w)
+            {
+                temp_x = ((int)curlayer->dispW - scn_w)>>1;
+            }
+            else
+            {
+                temp_x = 0;
+            }
         }
         else
         {
@@ -348,7 +357,14 @@ static void hwc_computerlayerdisplayframe(hwc_composer_device_t *dev)
 
         if(curlayer->posY_org == ((curlayer->org_dispH - curlayer->posH_org)>>1))
 	    {
-            temp_y = (curlayer->dispH - scn_h)>>1;
+            if(curlayer->dispW > (uint32_t)scn_h)
+            {
+                temp_y = ((int)curlayer->dispH - scn_h)>>1;
+            }
+            else
+            {
+                temp_y = 0;
+            }
         }
 	    else
 	    {
@@ -523,11 +539,11 @@ static int hwc_setrect(sun4i_hwc_context_t *ctx,hwc_rect_t *croprect,hwc_rect_t 
 /*****************************************************************************/
 static int hwc_prepare(hwc_composer_device_t *dev, hwc_layer_list_t* list) 
 {
-	LOGV("hwc_prepare list->numHwLayers = %d\n",list->numHwLayers);
+	//LOGV("hwc_prepare list->numHwLayers = %d\n",list->numHwLayers);
    // if (list && (list->flags & HWC_GEOMETRY_CHANGED)) 
     if(true)
     {
-    	LOGV("hwc_prepare HWC_GEOMETRY_CHANGED list->numHwLayers = %d\n",list->numHwLayers);
+    	//LOGV("hwc_prepare HWC_GEOMETRY_CHANGED list->numHwLayers = %d\n",list->numHwLayers);
     	
         for (size_t i=0 ; i<list->numHwLayers ; i++) 
         {
@@ -536,14 +552,14 @@ static int hwc_prepare(hwc_composer_device_t *dev, hwc_layer_list_t* list)
         		//dump_layer(&list->hwLayers[i]);
             	list->hwLayers[i].compositionType = HWC_OVERLAY;
             	
-            	LOGV("hwc_prepare HWC_OVERLAY i = %d\n",i);
+            	//LOGV("hwc_prepare HWC_OVERLAY i = %d\n",i);
         	}
         	else
         	{
         		//dump_layer(&list->hwLayers[i]);
             	list->hwLayers[i].compositionType = HWC_FRAMEBUFFER;
             	
-            	LOGV("hwc_prepare HWC_FRAMEBUFFER i = %d\n",i);
+            	//LOGV("hwc_prepare HWC_FRAMEBUFFER i = %d\n",i);
         	}
         }
     }
@@ -878,25 +894,29 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
         args[1]                         = ctx->hwc_layer.currenthandle;
     	args[2]                         = 0;
     	args[3]                         = 0;
+
+		
+		LOGV("----------screen: %d, handle: %d", screen, ctx->hwc_layer.currenthandle);
 		if(value == 1)
 		{
 			if(ctx->hwc_layeropen == false)
 			{
+				LOGV("----------hwc_layeropen false");
 				ret = ioctl(fd, DISP_CMD_LAYER_OPEN,args);
 				
-				ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);
+			    ioctl(ctx->dispfd, DISP_CMD_VIDEO_START, args);				
 
 			    args[0] 						= ctx->hwc_screen;
 			    args[1] 						= fb_layer_hdl;
 			    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_OFF,(void*)args);//disable the global alpha, use the pixel's alpha
-				
-				ctx->hwc_layeropen = true;
+					ctx->hwc_layeropen = true;
 			}
 		}
 		else
 		{
 			if(ctx->hwc_layeropen == true)
 			{
+				LOGV("----------hwc_layeropen true");
 				ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
 				
 				ioctl(fd, DISP_CMD_VIDEO_STOP, args);
@@ -904,10 +924,10 @@ static int hwc_show(sun4i_hwc_context_t *ctx,int value)
 			    args[0] 						= ctx->hwc_screen;
 			    args[1] 						= fb_layer_hdl;
 			    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_ON,(void*)args);//disable the global alpha, use the pixel's alpha
+
 				ctx->hwc_layeropen = false;
 			}
 		}
-    	
 	}
 
     return ret;
@@ -998,7 +1018,68 @@ static int hwc_reqshow(sun4i_hwc_context_t *ctx,int value)
 				ctx->hwc_reqclose = true;
 			}
 		}
-    	
+	}
+
+    return ret;
+}
+
+// for taking photo to avoid preview wrong
+static int hwc_release(sun4i_hwc_context_t *ctx)
+{
+    uint32_t					overlay;
+    int                         fd;
+    int                         ret = 0;
+    int                         screen;
+    
+    LOGV("hwc_release!ctx->hwc_layer.currenthandle = %d\n",ctx->hwc_layer.currenthandle);
+
+    overlay                         = ctx->hwc_layer.currenthandle;
+    fd                          	= ctx->dispfd;
+    screen                          = ctx->hwc_screen;
+//	LOGV("handle = %x,tmpFrmBufAddr.addr[0] = %x,tmpFrmBufAddr.addr[1] = %x,screen = %d\n",handle,tmpFrmBufAddr.addr[0],tmpFrmBufAddr.addr[1],screen);
+
+    if(ctx->hwc_layer.currenthandle)
+   	{
+	    args[0]							= screen;
+        args[1]                         = ctx->hwc_layer.currenthandle;
+    	args[2]                         = 0;
+    	args[3]                         = 0;
+		ret = ioctl(fd, DISP_CMD_LAYER_CLOSE,args);
+		
+		ioctl(fd, DISP_CMD_VIDEO_STOP, args);
+
+        ioctl(ctx->dispfd, DISP_CMD_LAYER_RELEASE,args);
+
+        ctx->hwc_layer.currenthandle    = 0;
+
+	    args[0] 						= ctx->hwc_screen;
+	    args[1] 						= fb_layer_hdl;
+	    ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_ON,(void*)args);//disable the global alpha, use the pixel's alpha
+	    
+		args[0] 						= ctx->hwc_screen;
+		ret = ioctl(ctx->dispfd,DISP_CMD_GET_OUTPUT_TYPE,args);
+		if(ret == DISP_OUTPUT_TYPE_HDMI && (ctx->cur_3denable == true))
+		{
+			args[0] 					= ctx->hwc_screen;
+			args[1] 					= 0;
+			args[2] 					= 0;
+			args[3] 					= 0;
+			ioctl(ctx->dispfd,DISP_CMD_HDMI_OFF,(unsigned long)args);
+			
+			LOGV("ctx->cur_hdmimode %d",ctx->cur_hdmimode);
+			args[0] 					= ctx->hwc_screen;
+			args[1] 					= ctx->cur_hdmimode;
+			args[2] 					= 0;
+			args[3] 					= 0;
+			ioctl(ctx->dispfd, DISP_CMD_HDMI_SET_MODE, args);
+			
+			args[0] 					= ctx->hwc_screen;
+			args[1] 					= 0;
+			args[2] 					= 0;
+			args[3] 					= 0;
+			ioctl(ctx->dispfd,DISP_CMD_HDMI_ON,(unsigned long)args);
+		}
+		ctx->hwc_layeropen = false;
 	}
 
     return ret;
@@ -1760,6 +1841,11 @@ static int hwc_setparameter(hwc_composer_device_t *dev,uint32_t param,uint32_t v
 		LOGV("param == HWC_LAYER_SHOW,value = %d\n",value);
     	ret = hwc_reqshow(ctx,value);
 	}
+    else if(param == HWC_LAYER_RELEASE)
+    {
+        LOGV("param == HWC_LAYER_RELEASE,value = %d\n",value);
+        ret = hwc_release(ctx);
+    }
 	else if(param == HWC_LAYER_SET3DMODE)
 	{
 		LOGV("param == HWC_LAYER_SET3DMODE,value = %d\n",value);
@@ -1835,7 +1921,7 @@ static int hwc_set_layer(hwc_composer_device_t *dev,hwc_layer_list_t* list)
     sun4i_hwc_context_t   		*ctx = (sun4i_hwc_context_t *)dev;
     bool						findoverlay = false;
     
-    LOGV("hwc_set_layer list->numHwLayers = %d\n",list->numHwLayers);
+    //LOGV("hwc_set_layer list->numHwLayers = %d\n",list->numHwLayers);
     
 	for (size_t i=0 ; i<list->numHwLayers ; i++)         
     {       
@@ -1849,7 +1935,6 @@ static int hwc_set_layer(hwc_composer_device_t *dev,hwc_layer_list_t* list)
     
     if(!findoverlay)
     {
-    	
     	hwc_show(ctx,0);
     }   
     
@@ -1886,6 +1971,11 @@ static int hwc_device_close(struct hw_device_t *dev)
             args[2] = 0;		    
             args[3] = 0;        
 
+            args[0] 						= ctx->hwc_screen;
+	        args[1] 						= fb_layer_hdl;
+	        ioctl(ctx->dispfd,DISP_CMD_LAYER_ALPHA_ON,(void*)args);//disable the global alpha, use the pixel's alpha
+
+            ioctl(ctx->dispfd, DISP_CMD_VIDEO_STOP, args);
             ioctl(ctx->dispfd, DISP_CMD_LAYER_RELEASE,args);
         }
         args[0] 						= ctx->hwc_screen;

@@ -531,3 +531,13 @@ service ril-daemon /system/bin/rild -l liballwinner-ril.so -- -d /dev/ttyUSB2
     socket rild-debug stream 660 radio system
     user root
     group radio cache inet misc audio sdcard_rw
+
+service preinstall /system/bin/busybox sh /system/bin/preinstall.sh
+	user root
+    group root
+    disabled
+    oneshot
+               
+on property:sys.boot_completed=1
+    start preinstall
+
