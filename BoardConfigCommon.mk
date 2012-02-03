@@ -32,9 +32,10 @@ BOARD_USES_GPS_TYPE := simulator
 
 # audio & camera & cedarx
 CEDARX_CHIP_VERSION := F23
+CEDARX_USE_SWAUDIO := N
 
 # use our own su for root
 BOARD_USES_ROOT_SU := true
 
 # hardware module include file path
-TARGET_HARDWARE_INCLUDE := $(TOP)/device/softwinner/crane-common/hardware/include
+TARGET_HARDWARE_INCLUDE := $(TOP)/device/softwinner/common/hardware/include

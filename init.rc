@@ -158,6 +158,9 @@ on post-fs-data
     mkdir /data/misc/dhcp 0770 dhcp dhcp
     chown dhcp dhcp /data/misc/dhcp    
 
+    # radio related, such as imei.conf
+    mkdir /data/misc/radio 0777 system radio
+
     # script for 3G dongle
     chmod 0777 /system/etc/usb_modeswitch.sh
     chmod 0777 /system/etc/ppp/call-pppd
@@ -519,6 +522,16 @@ service iprenew_wlan0 /system/bin/dhcpcd -n
 	disabled
 	oneshot
 
+service dhcpcd_eth0 /system/bin/dhcpcd -ABKL
+	class main
+    disabled
+    oneshot    
+
+service iprenew_eth0 /system/bin/dhcpcd -n
+	class main
+	disabled
+	oneshot
+
 service u3gmonitor /system/bin/u3gmonitor
 	class main
 	user root
@@ -540,4 +553,3 @@ service preinstall /system/bin/busybox sh /system/bin/preinstall.sh
                
 on property:sys.boot_completed=1
     start preinstall
-

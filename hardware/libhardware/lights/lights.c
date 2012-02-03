@@ -71,7 +71,9 @@ rgb_to_brightness(struct light_state_t const* state)
     
     bright = ((77*((color>>16)&0x00ff)) + (150*((color>>8)&0x00ff)) + (29*(color&0x00ff))) >> 8;
 
-    bright = bright >> 4;
+    //support backlight 0-255
+//    bright = bright >> 4;
+
 
 	/* fix bright value >=5 , for HW reason*/
 	if(bright < 5)
